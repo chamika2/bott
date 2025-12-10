@@ -20,7 +20,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 # 🚨 CRITICAL: REPLACE THESE VALUES
 BOT_TOKEN = '6454456940:AAFUAbZatEwrNvv75emY_376l7yJDmr5-48' 
 ADMIN_USERNAME = '@prasa_z' 
-ADMIN_ID = 6221106415 
+ADMIN_ID = 6221106415 # <--- ඔබගේ ID එක
 REQUIRED_CHANNEL = "@sni_hunter" 
 # 🚨 END CRITICAL BLOCK
 
@@ -54,7 +54,6 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # --- 2. DUAL LANGUAGE MESSAGES (FINALIZED) ---
 # ----------------------------------------------------
 
-# 🚨 PREMIUM BENEFITS MESSAGE (English Only, as requested)
 PREMIUM_BENEFITS_MESSAGE = f"""
 👑 <b>Premium Benefits</b> 👑
 ------------------------------------------------
@@ -76,7 +75,6 @@ PREMIUM_BENEFITS_MESSAGE = f"""
 ගෙවීම් කළ පසු, ඔබගේ <b>ගෙවීම් රිසිට්පත (Payment Receipt)</b> සහ ඔබගේ Telegram <b>User Name</b> එක {ADMIN_USERNAME} වෙත එවන්න.
 """
 
-# PREMIUM REQUIRED MESSAGE (Dual Language)
 PREMIUM_MESSAGE = f"""
 👑 <b>Premium Access අවශ්‍යයි</b> 👑
 
@@ -88,7 +86,6 @@ You have used your <b>Daily Free Scan limit ({FREE_SCAN_LIMIT})</b>.
 Advanced features require Premium. Check <code>/benefits</code> for more info.
 """
 
-# WELCOME MESSAGE (Dual Language)
 WELCOME_MESSAGE = f"""
 🤖 <b>Advanced SNI Hunter Bot</b> වෙත සාදරයෙන් පිළිගනිමු!
 
@@ -141,28 +138,23 @@ def setup_db():
     conn.close()
 
 def check_membership(user_id):
-    """Checks if the user is a member of the required channel."""
     if not REQUIRED_CHANNEL:
-        return True # Skip check if channel is not defined
-
+        return True 
     try:
-        # Check if the bot can see the user's status in the channel
         member = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         if member.status in ['member', 'administrator', 'creator']:
             return True
         else:
             return False
     except telebot.apihelper.ApiException as e:
-        # Error 400: Bad Request: member list is inaccessible (Admin permission issue)
         if 'member list is inaccessible' in str(e):
              print(f"ERROR 400: Member list inaccessible for {REQUIRED_CHANNEL}. Check Bot Admin permissions.")
-             return False # Force them to join/fix the issue
-        # Error 400: User not found in chat (or bot is blocked by user)
+             return False 
         elif 'user not found' in str(e):
              return False
         else:
              print(f"TeleBot API Error in check_membership: {e}")
-             return False # Default to false on unknown error
+             return False 
 
 def send_join_channel_message(message):
     keyboard = InlineKeyboardMarkup()
@@ -176,6 +168,7 @@ def send_join_channel_message(message):
     bot.reply_to(message, join_msg, parse_mode='HTML', reply_markup=keyboard)
 
 def get_user_status(user_id, username=None):
+    """Retrieves user's scan count and premium status. ADMIN always gets Premium."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT free_scans_used, is_premium, premium_expiry FROM users WHERE user_id=?", (user_id,))
@@ -189,11 +182,20 @@ def get_user_status(user_id, username=None):
                        (user_id, username, datetime.date.today().strftime('%Y-%m-%d'), expiry))
         conn.commit()
         free_scans_used, is_premium, premium_expiry = 0, 0, expiry
+
+    # 👑 ADMIN OVERRIDE
+    if user_id == ADMIN_ID:
+        is_premium = 1
+        premium_expiry = "Admin" 
         
     conn.close()
     return free_scans_used, is_premium, premium_expiry
 
 def check_premium_expiry(user_id):
+    """Checks and revokes expired premium access (Admin is never revoked)."""
+    if user_id == ADMIN_ID:
+        return
+        
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT is_premium, premium_expiry FROM users WHERE user_id=?", (user_id,))
@@ -212,6 +214,9 @@ def check_premium_expiry(user_id):
     conn.close()
 
 def check_and_reset_daily_limit(user_id, current_used):
+    if user_id == ADMIN_ID:
+        return 0 # Admin always has 0 used
+        
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     today = datetime.date.today().strftime('%Y-%m-%d')
@@ -230,6 +235,9 @@ def check_and_reset_daily_limit(user_id, current_used):
     return current_used
 
 def update_scan_count(user_id):
+    if user_id == ADMIN_ID:
+        return # Admin scans are not counted
+        
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     today = datetime.date.today().strftime('%Y-%m-%d')
@@ -346,6 +354,7 @@ def generate_ml_based_subdomains(domain):
 # ----------------------------------------------------
 
 def premium_required(func):
+    """Decorator to check if user has premium access or is Admin."""
     def wrapper(message, *args, **kwargs):
         user_id = message.from_user.id
         username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{message.from_user.id}"
@@ -353,6 +362,10 @@ def premium_required(func):
         if not check_membership(user_id):
             send_join_channel_message(message)
             return
+
+        # ADMIN OVERRIDE CHECK
+        if user_id == ADMIN_ID:
+            return func(message, *args, **kwargs)
 
         check_premium_expiry(user_id)
         _, is_premium, _ = get_user_status(user_id, username)
@@ -365,6 +378,7 @@ def premium_required(func):
     return wrapper
 
 def free_scan_check(func):
+    """Decorator to check free user's daily limit (Admin bypasses)."""
     def wrapper(message, *args, **kwargs):
         user_id = message.from_user.id
         username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{message.from_user.id}"
@@ -373,11 +387,16 @@ def free_scan_check(func):
             send_join_channel_message(message)
             return
             
+        # ADMIN OVERRIDE CHECK
+        if user_id == ADMIN_ID:
+            return func(message, *args, **kwargs)
+            
         check_premium_expiry(user_id)
         scans_used, is_premium, _ = get_user_status(user_id, username)
         scans_used = check_and_reset_daily_limit(user_id, scans_used)
 
         if is_premium == 1:
+            # Premium users bypass all limits
             return func(message, *args, **kwargs)
         
         if scans_used >= FREE_SCAN_LIMIT:
@@ -419,7 +438,10 @@ def handle_status_command(message):
     status_msg = f"📊 <b>User Status</b>\n"
     status_msg += "---------------------------------\n"
     
-    if is_premium == 1:
+    if user_id == ADMIN_ID:
+        status_msg += f"👑 <b>Admin/Premium User:</b> ✅ (Status: Permanent)\n"
+        status_msg += "🚀 <b>Scans Remaining:</b> Unlimited\n"
+    elif is_premium == 1:
         status_msg += f"👑 <b>Premium User:</b> ✅ (Expires: {expiry})\n"
         status_msg += "🚀 <b>Scans Remaining:</b> Unlimited\n"
     else:
@@ -861,9 +883,7 @@ def handle_watch_command(message):
 # --- 7. ADMIN HANDLERS (Basic Grant/Revoke/Broadcast Placeholder) ---
 # ----------------------------------------------------
 
-# Note: Full Admin handlers (grant/revoke/broadcast) are complex. 
-# They must be added here, ensuring they only respond to ADMIN_ID. 
-# Example Admin check structure:
+# (Admin Grant, Revoke, Broadcast logic would go here)
 
 @bot.message_handler(commands=['admin'])
 def handle_admin_command(message):
@@ -896,7 +916,7 @@ def watchlist_checker():
         for user_id, domain, old_ip, old_status in watched_domains:
             # Check for premium status before notifying
             _, is_premium, _ = get_user_status(user_id)
-            if is_premium == 0:
+            if is_premium == 0 and user_id != ADMIN_ID:
                 # Remove expired watcher
                 cursor.execute("DELETE FROM watchlist WHERE user_id=? AND domain=?", (user_id, domain))
                 conn.commit()
@@ -958,7 +978,7 @@ if __name__ == '__main__':
             BotCommand("status", "Daily Limit Status"),
             BotCommand("premium", "Get Premium Access"),
             BotCommand("benefits", "Premium Benefits"),
-            BotCommand("admin", "Admin Dashboard (ADMIN)"), # Added admin command to list
+            BotCommand("admin", "Admin Dashboard (ADMIN)"),
             BotCommand("start", "Restart Bot") 
         ])
         bot.polling(none_stop=True)
