@@ -18,7 +18,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 # ----------------------------------------------------
 
 # 🚨 CRITICAL: REPLACE THESE VALUES
-BOT_TOKEN = '8205587502:AAEnWA_-TcEXm7qPyojU_7W04AmjTXxdCI8' 
+BOT_TOKEN = '6454456940:AAFUAbZatEwrNvv75emY_376l7yJDmr5-48' 
 ADMIN_USERNAME = '@prasa_z' 
 ADMIN_ID = 6221106415 
 REQUIRED_CHANNEL = "@sni_hunter" 
