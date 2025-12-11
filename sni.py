@@ -1022,6 +1022,8 @@ if __name__ == '__main__':
     
     try:
         # Bot Commands ලැයිස්තුව යාවත්කාලීන කරයි
+        # 🚨 වෙනස් කළේ: Admin-Only Commands මෙතැනින් ඉවත් කරනු ලැබේ 
+        # (ඒවා /admin විධානයට අදාළ Keyboard එකෙන් Admin හට තවදුරටත් පෙනෙනු ඇත)
         bot.set_my_commands([
             telebot.types.BotCommand("/scan", "Domain Scan (Free)"),
             telebot.types.BotCommand("/status", "Current Scan Status"),
@@ -1033,11 +1035,13 @@ if __name__ == '__main__':
             telebot.types.BotCommand("/ml_sni_scan", "Zero-Day ML SNI Hunter (Premium)"),
             telebot.types.BotCommand("/latency", "Live Latency Check (Premium)"),
             telebot.types.BotCommand("/watch", "Proactive Monitoring (Premium)"),
-            telebot.types.BotCommand("/admin", "Admin Dashboard (Admin only)"),
-            telebot.types.BotCommand("/broadcast", "Broadcast Message (Admin only)"),
-            telebot.types.BotCommand("/searchlogs", "View User Search Logs (Admin only)"),
+            # /admin, /broadcast, /searchlogs මෙතැනින් ඉවත් කර ඇත
             telebot.types.BotCommand("/start", "Restart the Bot") 
         ])
+        
+        # 💡 Admin හට /admin විධානය තවමත් ක්‍රියාත්මක කළ හැක (කේතයේ handle_admin_command)
+        # එමෙන්ම Admin හට Keyboard එක හරහා සියලුම Admin Functions භාවිතා කළ හැක.
+
         bot.polling(none_stop=True, interval=0)
     except Exception as e:
         print(f"Bot startup error: {e}")
