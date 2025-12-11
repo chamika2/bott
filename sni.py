@@ -16,10 +16,9 @@ ADMIN_USERNAME = '@prasa_z'
 ADMIN_ID = 6221106415 # ඔබගේ Telegram User ID එක
 
 # 🚨 CHANNEl CONFIGURATION 🚨
-# මෙම අගයන් ඔබගේ Channel එකට අනුව වෙනස් කරන්න.
-CHANNEL_USERNAME = '@sni_hunter'  # https://t.me/sni_hunter හි @sni_hunter යන්න.
-# Channel ID එක සොයා ගැනීමට Bot භාවිත කරන්න (උදා: @getidsbot). එය -100... න් ආරම්භ විය යුතුය.
-CHANNEL_ID = -1003131855993  # ⚠️ නිවැරදි ID එක මෙහි ඇතුළත් කරන්න!
+# ඔබ ලබා දුන් JSON එක අනුව නිවැරදි කරන ලද ID එක
+CHANNEL_USERNAME = '@sni_hunter'  
+CHANNEL_ID = -1003131855993  # ✅ නිවැරදි Channel ID එක
 # -----------------------------------
 
 # Freemium/Scanning Settings
@@ -27,10 +26,10 @@ DEFAULT_PORTS = [80, 443, 8080, 8443]
 CRITICAL_PORTS = [21, 23, 22, 3389, 5900]
 TIMEOUT = 1.0
 MAX_WORKERS = 40
-FREE_SCAN_LIMIT = 10 # ⬅️⬅️⬅️ වෙනස්කම: දැන් දිනකට 10යි.
+FREE_SCAN_LIMIT = 10 # දිනකට නොමිලේ භාවිත කළ හැකි සීමාව 
 FREE_HOST_LIMIT = 50
 
-# Database (දැන් මෙය සාර්ථකව ක්‍රියාත්මක වේ)
+# Database
 DB_NAME = 'sni_bot_users.db' 
 
 # AI Wordlist
@@ -44,7 +43,7 @@ PREDICTIVE_WORDLIST = [
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ----------------------------------------------------
-# --- DUAL LANGUAGE MESSAGES (FREE_SCAN_LIMIT යාවත්කාලීන වේ) ---
+# --- DUAL LANGUAGE MESSAGES (නව විශේෂාංග ඇතුළත් වේ) ---
 # ----------------------------------------------------
 
 PREMIUM_MESSAGE = (
@@ -67,12 +66,27 @@ WELCOME_MESSAGE = (
     "🤖 <b>Advanced SNI Hunter Bot</b> වෙත සාදරයෙන් පිළිගනිමු!\n\n"
     "✨ <b>Free Trial Offer:</b>\n"
     f"ඔබට කිසිදු ගාස්තුවක් නොමැතිව <b>සම්පූර්ණ Scans {FREE_SCAN_LIMIT}ක්</b> දිනපතා භාවිතා කළ හැක. සෑම Scan එකකදීම සොයාගත් Host <b>{FREE_HOST_LIMIT}ක්</b> පමණක් පෙන්වනු ලැබේ.\n"
-    "භාවිතා කරන ආකාරය: <code>/scan domain.com</code>\n"
     "----------------------------------------\n"
-    "🤖 <b>Welcome to Advanced SNI Hunter Bot</b>!\n\n"
-    "✨ <b>Free Trial Offer:</b>\n"
-    f"You can use <b>{FREE_SCAN_LIMIT} complete Scans</b> daily free of charge. Each scan will show only <b>{FREE_HOST_LIMIT} hosts</b> found.\n"
-    "Usage: <code>/scan domain.com</code>"
+    "<b>(new update ✅)</b>\n\n"
+    "🟢 <b>Free Access Features</b>\n\n"
+    "Domain Scanner (<code>/scan</code>)\n"
+    "DNS Lookup (<code>/dns</code>)\n"
+    "Header Analyzer (<code>/header</code>)\n"
+    "Proxy Probe (<code>/probe</code>)\n\n"
+    "🟣 <b>Premium Access Features</b>\n\n"
+    "Zero-Day ML SNI Hunter (<code>/ml_sni_scan</code>)\n"
+    "Live Latency Check (<code>/latency</code>)\n"
+    "Proactive Monitoring (<code>/watch</code>)\n"
+    "Unlimited Scanning\n"
+    "Ad-Free Experience\n\n"
+    "⚙️ <b>Utility & Status Commands</b>\n\n"
+    "Restart Bot (<code>/start</code>)\n"
+    "Daily Limit Status (<code>/status</code>)\n"
+    "Get Premium Access (<code>/premium</code>)\n"
+    "Premium Benefits (<code>/benefits</code>)\n"
+    "Admin Dashboard (<code>/admin</code>)\n"
+    "----------------------------------------\n"
+    "<b>Usage:</b> <code>/scan domain.com</code>"
 )
 
 # ----------------------------------------------------
@@ -364,13 +378,12 @@ def fetch_subdomains(domain):
 def scan_target(host):
     """තනි Host එකක Ports Scan කරයි."""
     data = {
-        "host": host, "ip": "N/A", "ports": [], "server": "Unknown", "status": "Offline", "isp": "N/A"
+        "host": host, "ip": "N/A", "ports": [], "server": "Unknown", "status": "Online", "isp": "N/A"
     }
     
     try:
         ip = socket.gethostbyname(host)
         data["ip"] = ip
-        data["status"] = "Online"
         
         for port in DEFAULT_PORTS:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -410,7 +423,7 @@ def scan_target(host):
             data["isp"] = get_isp_info(ip)
 
     except:
-        pass
+        data["status"] = "Offline"
         
     return data
 
@@ -497,6 +510,119 @@ def handle_status_command(message):
 
     bot.reply_to(message, status_msg, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
+
+def check_premium_access(user_id, command_name):
+    """Premium අවශ්‍ය commands සඳහා පරීක්ෂා කිරීමේ සහායක function එක."""
+    # Username අවශ්‍ය වන්නේ නම් මෙසේ ලබා ගත හැක, නැතහොත් user_id පමණක් භාවිතා කරන්න.
+    # username = f"@{bot.get_chat(user_id).username}" if bot.get_chat(user_id).username else f"ID_{user_id}"
+    check_premium_expiry(user_id)
+    _, is_premium, _, _ = get_user_status(user_id, None) 
+    
+    if is_premium == 0:
+        bot.send_message(user_id, f"🚫 **{command_name}** විධානය **Premium Users** සඳහා පමණි. වැඩි විස්තර සඳහා /premium ඔබන්න.", parse_mode='HTML')
+        return False
+    return True
+
+# --- FREE ACCESS HANDLERS (FREE FEATURES) ---
+
+@bot.message_handler(commands=['dns'])
+def handle_dns_command(message):
+    user_id = message.from_user.id
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    # DNS Lookup Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "🔎 **DNS Lookup (<code>/dns</code>)**: මෙම පහසුකම ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/dns domain.com</code>\n\n<i>(DNS Lookup Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+@bot.message_handler(commands=['header'])
+def handle_header_command(message):
+    user_id = message.from_user.id
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    # Header Analyzer Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "🔎 **Header Analyzer (<code>/header</code>)**: මෙම පහසුකම ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/header https://example.com</code>\n\n<i>(Header Analyzer Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+@bot.message_handler(commands=['probe'])
+def handle_probe_command(message):
+    user_id = message.from_user.id
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    # Proxy Probe Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "🔎 **Proxy Probe (<code>/probe</code>)**: මෙම පහසුකම ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/probe 192.168.1.1:8080</code>\n\n<i>(Proxy Probe Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+@bot.message_handler(commands=['benefits'])
+def handle_benefits_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    benefits_msg = (
+        "👑 **Premium Benefits / වරප්‍රසාද** 👑\n\n"
+        "1. **Zero-Day ML SNI Hunter** (<code>/ml_sni_scan</code>)\n"
+        "2. **Live Latency Check** (<code>/latency</code>)\n"
+        "3. **Proactive Monitoring** (<code>/watch</code>)\n"
+        "4. **Unlimited Scanning** (අසීමිත Scans)\n"
+        "5. **Ad-Free Experience** (දැන්වීම් නැත)\n"
+        "6. **Full Host Results** (සීමා රහිත ප්‍රතිඵල)\n\n"
+        "වැඩි විස්තර: /premium"
+    )
+    bot.reply_to(message, benefits_msg, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+# --- PREMIUM ONLY HANDLERS ---
+
+@bot.message_handler(commands=['ml_sni_scan'])
+def handle_ml_sni_scan_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    if not check_premium_access(user_id, "/ml_sni_scan"): return
+    
+    # ML SNI Hunter Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "👑 **Zero-Day ML SNI Hunter** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/ml_sni_scan domain.com</code>\n\n<i>(ML Scan Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+@bot.message_handler(commands=['latency'])
+def handle_latency_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    if not check_premium_access(user_id, "/latency"): return
+
+    # Live Latency Check Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "👑 **Live Latency Check** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/latency domain.com</code>\n\n<i>(Latency Check Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+@bot.message_handler(commands=['watch'])
+def handle_watch_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML')
+        
+    if not check_premium_access(user_id, "/watch"): return
+    
+    # Proactive Monitoring Logic goes here (For now, a placeholder):
+    bot.reply_to(message, "👑 **Proactive Monitoring** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/watch domain.com</code>\n\n<i>(Monitoring Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+# ----------------------------------------------------
+# --- ADMIN HANDLERS ---
+# ----------------------------------------------------
 
 @bot.message_handler(commands=['admin'])
 def handle_admin_command(message):
@@ -841,14 +967,19 @@ if __name__ == '__main__':
     setup_db() 
     print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
     
-    if CHANNEL_ID == -100123456789:
-         print("🚨 අත්‍යාවශ්‍ය අනතුරු ඇඟවීම: CHANNEL_ID වෙනස් කරන්න! 🚨")
-    
     try:
+        # Bot Commands ලැයිස්තුව යාවත්කාලීන කරයි
         bot.set_my_commands([
             telebot.types.BotCommand("/scan", "Domain Scan"),
             telebot.types.BotCommand("/status", "Current Scan Status"),
             telebot.types.BotCommand("/premium", "Get Premium Access Details"),
+            telebot.types.BotCommand("/dns", "DNS Lookup Tool"),
+            telebot.types.BotCommand("/header", "Header Analyzer"),
+            telebot.types.BotCommand("/probe", "Proxy Probe"),
+            telebot.types.BotCommand("/benefits", "View Premium Benefits"),
+            telebot.types.BotCommand("/ml_sni_scan", "Zero-Day ML SNI Hunter (Premium)"),
+            telebot.types.BotCommand("/latency", "Live Latency Check (Premium)"),
+            telebot.types.BotCommand("/watch", "Proactive Monitoring (Premium)"),
             telebot.types.BotCommand("/admin", "Admin Dashboard (Admin only)"),
             telebot.types.BotCommand("/broadcast", "Broadcast Message (Admin only)"),
             telebot.types.BotCommand("/searchlogs", "View User Search Logs (Admin only)"),
