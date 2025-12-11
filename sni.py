@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-# Bot Tool Name: Ultra Pro SNI Hunter Bot
-
 import telebot
 import requests
 import socket
@@ -10,549 +7,853 @@ import threading
 import sqlite3
 import datetime
 import time
-import dns.resolver
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.apihelper import ApiTelegramException 
 
-# ----------------------------------------------------
-# --- 1. CONFIGURATION & SETTINGS ---
-# ----------------------------------------------------
+# --- 1. CONFIGURATION (නියතයන්) ---
+BOT_TOKEN = '6454456940:AAFUAbZatEwrNvv75emY_376l7yJDmr5-48' # ඔබගේ Bot Token එක
+ADMIN_USERNAME = '@prasa_z'
+ADMIN_ID = 6221106415 # ඔබගේ Telegram User ID එක
 
-# 🚨 CRITICAL: REPLACE WITH YOUR DETAILS
-BOT_TOKEN = '6454456940:AAFUAbZatEwrNvv75emY_376l7yJDmr5-48' 
-ADMIN_USERNAME = '@prasa_z' 
-ADMIN_ID = 6221106415 
-REQUIRED_CHANNEL = "@sni_hunter" 
-# 🚨 END CRITICAL BLOCK
+# 🚨 CHANNEl CONFIGURATION 🚨
+# මෙම අගයන් ඔබගේ Channel එකට අනුව වෙනස් කරන්න.
+CHANNEL_USERNAME = '@sni_hunter'  # https://t.me/sni_hunter හි @sni_hunter යන්න.
+# Channel ID එක සොයා ගැනීමට Bot භාවිත කරන්න (උදා: @getidsbot). එය -100... න් ආරම්භ විය යුතුය.
+CHANNEL_ID = -1003131855993  # ⚠️ නිවැරදි ID එක මෙහි ඇතුළත් කරන්න!
+# -----------------------------------
 
-# Scanning Settings
-DEFAULT_PORTS = [80, 443, 8080, 8443, 2053, 2083, 4444] 
-TIMEOUT = 1.5
+# Freemium/Scanning Settings
+DEFAULT_PORTS = [80, 443, 8080, 8443]
+CRITICAL_PORTS = [21, 23, 22, 3389, 5900]
+TIMEOUT = 1.0
 MAX_WORKERS = 40
-FREE_SCAN_LIMIT = 10 
-FREE_HOST_LIMIT = 50 
+FREE_SCAN_LIMIT = 10 # ⬅️⬅️⬅️ වෙනස්කම: දැන් දිනකට 10යි.
+FREE_HOST_LIMIT = 50
 
-# Advanced Latency Check Nodes
-LATENCY_CHECK_NODES = {
-    "🇱🇰 Sri Lanka": "103.247.16.1", 
-    "🇸🇬 Singapore": "1.1.1.1",     
-    "🇺🇸 New York": "8.8.8.8",
-    "🇩🇪 Germany": "9.9.9.9"
-}
+# Database (දැන් මෙය සාර්ථකව ක්‍රියාත්මක වේ)
+DB_NAME = 'sni_bot_users.db' 
 
-# Database Name
-DB_NAME = 'sni_bot_users.db'
-
-# AI Wordlist (For ML-based Predictive Scans)
+# AI Wordlist
 PREDICTIVE_WORDLIST = [
-    "api", "dev", "web", "cdn", "mail", "proxy", "vpn", "access", "live", "app", 
-    "static", "assets", "mobile", "staging", "server", "tunnel", "connect", "zero", "fast"
+    "api", "dev", "test", "web", "cdn", "mail", "ftp", "admin", "proxy", "vpn", 
+    "access", "live", "app", "static", "assets", "mobile", "staging", "server",
+    "backup", "internal", "secure", "status"
 ]
 
 # --- Bot Initialization ---
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ----------------------------------------------------
-# --- 2. MESSAGES ---
+# --- DUAL LANGUAGE MESSAGES (FREE_SCAN_LIMIT යාවත්කාලීන වේ) ---
 # ----------------------------------------------------
 
-PREMIUM_BENEFITS_MESSAGE = f"""
-👑 <b>Premium Benefits (Ultra Pro)</b> 👑
-------------------------------------------------
-✅ <b>Unlimited Scans:</b> No daily limits.
-🛡️ <b>WAF/CDN Detector:</b> Identify Cloudflare, Akamai, etc. (<code>/waf</code>)
-🔒 <b>SSL Inspector:</b> Deep dive into SSL Certificates. (<code>/ssl</code>)
-🌍 <b>Whois/IP Info:</b> Get ISP, ASN, and Org details. (<code>/whois</code>)
-⚙️ <b>Custom Port Scan:</b> Scan specific ports (e.g., 22, 53). (<code>/port</code>)
-🧠 <b>Zero-Day ML Scan:</b> Find hidden SNI patterns. (<code>/ml_sni_scan</code>)
-⚡ <b>Live Latency:</b> Global ping check. (<code>/latency</code>)
-🔔 <b>Monitoring:</b> Watch for IP changes. (<code>/watch</code>)
-🚫 <b>Ad-Free:</b> No interruptions.
+PREMIUM_MESSAGE = (
+    "👑 <b>Premium Access අවශ්‍යයි</b> 👑\n\n"
+    f"ඔබගේ <b>Free Scan සීමාව ({FREE_SCAN_LIMIT})</b> අවසන් වී ඇත. අසීමිත Scans, සම්පූර්ණ ප්‍රතිඵල, **Advanced Filter** සහ **Risk Scoring** සඳහා Premium වෙත මාරු වන්න.\n"
+    "----------------------------------------\n"
+    "👑 <b>Premium Access Required</b> 👑\n\n"
+    f"Your <b>Free Scan limit ({FREE_SCAN_LIMIT})</b> is exhausted. Upgrade to Premium for unlimited scans, full results, **Advanced Filter**, and **Risk Scoring**.\n\n"
+    "💵 <b>ගාස්තුව / Fee:</b> Rs. 500/Month\n\n"
+    "🏦 <b>Bank Details:</b>\n"
+    "  <b>Bank:</b> <code>BOC</code>\n"
+    "  <b>A/C Name:</b> <code>K.G.C.SILVA</code>\n"
+    "  <b>A/C No:</b> <code>93872075</code>\n\n"
+    "📤 <b>Pay කරන්නේ කෙසේද / How to Pay:</b>\n"
+    f"ගෙවීම් කළ පසු, ඔබගේ <b>Payment Receipt</b> එක සහ ඔබගේ Telegram <b>User Name</b> එක {ADMIN_USERNAME} වෙත එවන්න.\n"
+    f"Send your <b>Payment Receipt</b> and your Telegram <b>User Name</b> to {ADMIN_USERNAME} after payment."
+)
 
-💵 <b>Fee:</b> Rs. 500/Month
-
-🏦 <b>Bank Details:</b>
-  <b>Bank:</b> <code>BOC</code>
-  <b>A/C Name:</b> <code>K.G.C.SILVA</code>
-  <b>A/C No:</b> <code>93872075</code>
-
-📤 <b>How to Pay:</b>
-Send your <b>Payment Receipt</b> and Telegram <b>User Name</b> to {ADMIN_USERNAME}.
-"""
-
-PREMIUM_MESSAGE = f"""
-👑 <b>Premium Access Required</b> 👑
-
-ඔබ අද දිනට හිමි <b>නොමිලේ Scan සීමාව ({FREE_SCAN_LIMIT})</b> භාවිතා කර අවසන්.
-Ultra Pro විශේෂාංග (WAF, SSL, Whois, Custom Ports) සඳහා Premium අවශ්‍ය වේ.
-----------------------------------------
-👑 <b>Premium Access Required</b> 👑
-You have used your <b>Daily Free Scan limit ({FREE_SCAN_LIMIT})</b>.
-Advanced features require Premium. Check <code>/benefits</code> for more info.
-"""
-
-WELCOME_MESSAGE = f"""
-🤖 <b>Ultra Pro SNI Hunter Bot</b> වෙත සාදරයෙන් පිළිගනිමු!
-
-✨ <b>Free Features:</b>
-  • Domain Scan (<code>/scan</code>)
-  • DNS Lookup (<code>/dns</code>)
-  • Header Check (<code>/header</code>)
-
-✨ <b>Premium Ultra Features:</b>
-  • WAF Detector (<code>/waf</code>)
-  • SSL Inspector (<code>/ssl</code>)
-  • Whois Info (<code>/whois</code>)
-  • Custom Ports (<code>/port</code>)
-  • ML Scan & Monitoring
-----------------------------------------
-✨ <b>Daily Free Offer:</b>
-ඔබට දිනකට <b>සම්පූර්ණ Scans {FREE_SCAN_LIMIT}ක්</b> නොමිලේ භාවිතා කළ හැක.
-භාවිතා කරන ආකාරය: <code>/scan domain.com</code>
-"""
+WELCOME_MESSAGE = (
+    "🤖 <b>Advanced SNI Hunter Bot</b> වෙත සාදරයෙන් පිළිගනිමු!\n\n"
+    "✨ <b>Free Trial Offer:</b>\n"
+    f"ඔබට කිසිදු ගාස්තුවක් නොමැතිව <b>සම්පූර්ණ Scans {FREE_SCAN_LIMIT}ක්</b> දිනපතා භාවිතා කළ හැක. සෑම Scan එකකදීම සොයාගත් Host <b>{FREE_HOST_LIMIT}ක්</b> පමණක් පෙන්වනු ලැබේ.\n"
+    "භාවිතා කරන ආකාරය: <code>/scan domain.com</code>\n"
+    "----------------------------------------\n"
+    "🤖 <b>Welcome to Advanced SNI Hunter Bot</b>!\n\n"
+    "✨ <b>Free Trial Offer:</b>\n"
+    f"You can use <b>{FREE_SCAN_LIMIT} complete Scans</b> daily free of charge. Each scan will show only <b>{FREE_HOST_LIMIT} hosts</b> found.\n"
+    "Usage: <code>/scan domain.com</code>"
+)
 
 # ----------------------------------------------------
-# --- 3. DATABASE FUNCTIONS ---
+# --- CORE CHECK FUNCTIONS ---
 # ----------------------------------------------------
+
+def is_subscribed(user_id):
+    """පරිශීලකයා අවශ්‍ය Channel එකට Join වී ඇත්දැයි පරීක්ෂා කරයි."""
+    if user_id == ADMIN_ID:
+        return True 
+        
+    try:
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        
+        if member.status in ['creator', 'administrator', 'member']:
+            return True
+        else:
+            return False
+            
+    except ApiTelegramException as e:
+        if 'chat not found' in str(e) or 'Bad Request' in str(e):
+             print(f"⚠️ Channel ID ({CHANNEL_ID}) හෝ Username ({CHANNEL_USERNAME}) වැරදියි. Bot එක Channel එකට Administrator කෙනෙක් ලෙස ඇතුළත් කර නොමැත.")
+             return True 
+        return False
+    except Exception:
+        return False
+
+def subscription_required_message():
+    """Subscribe කිරීමට අවශ්‍ය පණිවිඩය සහ Inline Keyboard එක ලබා දේ."""
+    
+    markup = InlineKeyboardMarkup()
+    join_button = InlineKeyboardButton("✅ අපගේ Channel එකට Join වන්න", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")
+    check_button = InlineKeyboardButton("🔄 මම Join වුණා (නැවත පරීක්ෂා කරන්න)", callback_data="check_subscription")
+    
+    markup.add(join_button)
+    markup.add(check_button)
+    
+    message = (
+        "🔒 **Subscription එකක් අවශ්‍යයි!**\n\n"
+        f"මෙම Bot එක භාවිතා කිරීමට, ඔබ අනිවාර්යයෙන්ම අපගේ Channel එකට **{CHANNEL_USERNAME}** Join විය යුතුය.\n"
+        "කරුණාකර පහත Button එක භාවිතා කර Join වී, ඉන්පසු 'මම Join වුණා' Button එක ඔබන්න.\n"
+        "----------------------------------------\n"
+        "🔒 **Subscription Required!**\n\n"
+        f"To use this Bot, you must join our Channel: **{CHANNEL_USERNAME}**.\n"
+        "Please use the button below to join and then click 'I Joined' to recheck."
+    )
+    
+    return message, markup
+
+# --- Database Functions ---
 
 def setup_db():
+    """සියලුම අවශ්‍ය තීරු සමඟ Database වගු නිර්මාණය කරයි."""
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    cursor = conn.cursor() 
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
-            username TEXT, 
+            username TEXT,
             free_scans_used INTEGER DEFAULT 0,
-            last_scan_date TEXT,
             is_premium INTEGER DEFAULT 0,
             premium_expiry TEXT,
-            joined_date TEXT
+            last_scan_date TEXT
         )
     """)
-    # Scan Logs (For Admin to see what users search)
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scan_logs (
             log_id INTEGER PRIMARY KEY,
             user_id INTEGER,
             domain TEXT,
-            command_type TEXT,
             timestamp TEXT
         )
     """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS watchlist (
-            watch_id INTEGER PRIMARY KEY,
-            user_id INTEGER,
-            domain TEXT UNIQUE,
-            last_check_ip TEXT,
-            last_check_status TEXT
-        )
-    """)
     conn.commit()
     conn.close()
 
-def log_activity(user_id, domain, command_type):
-    """Logs user activity for Admin review."""
+def log_scan_request(user_id, domain):
+    """පරිශීලකයා සෙවූ domain එක log කරයි."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute("INSERT INTO scan_logs (user_id, domain, command_type, timestamp) VALUES (?, ?, ?, ?)",
-                   (user_id, domain, command_type, timestamp))
+    cursor.execute("INSERT INTO scan_logs (user_id, domain, timestamp) VALUES (?, ?, ?)", 
+                   (user_id, domain, timestamp))
     conn.commit()
     conn.close()
 
-def check_membership(user_id):
-    if not REQUIRED_CHANNEL: return True
+def revoke_premium_access(user_id, reason_si="Admin විසින්", reason_en="revoked by Admin"):
+    """Premium Access ඉවත් කරයි."""
+    revoke_msg = (
+        f"⚠️ ඔබගේ **Premium Access** දැන් අවලංගු කර ඇත! හේතුව: {reason_si}.\n"
+        f"----------------------------------------\n"
+        f"⚠️ Your **Premium Access** has been revoked! Reason: {reason_en}."
+    )
     try:
-        member = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        if member.status in ['member', 'administrator', 'creator']: return True
-        return False
-    except telebot.apihelper.ApiException as e:
-        if 'member list is inaccessible' in str(e):
-             print(f"ERROR 400: Bot needs Admin in {REQUIRED_CHANNEL}.")
-             return False 
-        return False 
-
-def send_join_channel_message(message):
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton(text="➡️ Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.replace('@', '')}"))
-    bot.reply_to(message, f"🔒 <b>Access Denied</b>\nBot භාවිතා කිරීමට පෙර <b>{REQUIRED_CHANNEL}</b> චැනලයට එකතු වන්න.", parse_mode='HTML', reply_markup=keyboard)
-
-def get_user_status(user_id, username=None):
+        bot.send_message(user_id, revoke_msg, parse_mode='HTML')
+    except ApiTelegramException:
+        pass 
+    except Exception:
+        pass 
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT free_scans_used, is_premium, premium_expiry FROM users WHERE user_id=?", (user_id,))
-    user_data = cursor.fetchone()
-    
-    if user_data:
-        free_scans_used, is_premium, premium_expiry = user_data
-        # Update username if changed
-        if username:
-            cursor.execute("UPDATE users SET username=? WHERE user_id=?", (username, user_id))
-            conn.commit()
-    else:
-        expiry = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-        today = datetime.date.today().strftime('%Y-%m-%d')
-        cursor.execute("INSERT INTO users (user_id, username, last_scan_date, premium_expiry, joined_date) VALUES (?, ?, ?, ?, ?)", 
-                       (user_id, username, today, expiry, today))
-        conn.commit()
-        free_scans_used, is_premium, premium_expiry = 0, 0, expiry
-
-    if user_id == ADMIN_ID: # Admin is always Premium
-        is_premium = 1
-        premium_expiry = "Lifetime (Admin)" 
-        
+    cursor.execute("UPDATE users SET is_premium = 0, premium_expiry = NULL WHERE user_id = ?", (user_id,))
+    conn.commit()
     conn.close()
-    return free_scans_used, is_premium, premium_expiry
+
+def grant_premium_access(user_id, duration_days):
+    """Premium Access ලබා දේ."""
+    expiry_date = datetime.datetime.now() + datetime.timedelta(days=duration_days)
+    expiry_date_str = expiry_date.strftime('%Y-%m-%d')
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE users 
+        SET is_premium = 1, premium_expiry = ? 
+        WHERE user_id = ?
+    """, (expiry_date.strftime('%Y-%m-%d %H:%M:%S'), user_id))
+    
+    conn.commit()
+    conn.close()
+    
+    grant_msg = (
+        f"🎉 ඔබට දින <b>{duration_days}</b>ක් සඳහා **Premium Access** සාර්ථකව සක්‍රිය කරන ලදි!\nඑය {expiry_date_str} දින කල් ඉකුත් වනු ඇත.\n"
+        f"----------------------------------------\n"
+        f"🎉 Your **Premium Access** has been successfully activated for <b>{duration_days}</b> days!"
+    )
+    try:
+        bot.send_message(user_id, grant_msg, parse_mode='HTML')
+    except ApiTelegramException:
+        pass
+    except Exception:
+        pass
+
+def get_id_by_username(identifier):
+    """Username හෝ ID එක භාවිතයෙන් User ID එක සොයා ගනී."""
+    if identifier and identifier.isdigit():
+        return int(identifier)
+    
+    search_username = identifier if identifier and identifier.startswith('@') else f"@{identifier}"
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE username=?", (search_username,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return result[0]
+    return None
 
 def check_premium_expiry(user_id):
-    if user_id == ADMIN_ID: return
+    """Premium කාලය අවසන් දැයි පරීක්ෂා කරයි."""
+    if user_id == ADMIN_ID:
+        return False
+
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT is_premium, premium_expiry FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT is_premium, premium_expiry FROM users WHERE user_id = ?", (user_id,))
     data = cursor.fetchone()
-    if data and data[0] == 1:
-        try:
-            expiry_date = datetime.datetime.strptime(data[1], '%Y-%m-%d').date()
-            if expiry_date < datetime.date.today():
-                cursor.execute("UPDATE users SET is_premium=0, premium_expiry=? WHERE user_id=?", 
-                               ((datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'), user_id))
-                conn.commit()
-                try: bot.send_message(user_id, "🔔 <b>Premium Expired!</b> Renew via /premium.", parse_mode='HTML')
-                except: pass
-        except: pass
     conn.close()
 
-def check_and_reset_daily_limit(user_id, current_used):
-    if user_id == ADMIN_ID: return 0
+    if data and data[0] == 1 and data[1]:
+        try:
+            expiry_time = datetime.datetime.strptime(data[1], '%Y-%m-%d %H:%M:%S')
+            if datetime.datetime.now() > expiry_time:
+                revoke_premium_access(user_id, reason_si="කාලය අවසන්", reason_en="Expiry")
+                return True 
+        except ValueError:
+            return False 
+            
+    return False 
+
+def get_user_status(user_id, username):
+    """User තත්ත්වය ලබා ගනී (Daily Reset Logic සහිතව)."""
+    if user_id == ADMIN_ID:
+        return (0, 1, 'Never Expires', 'N/A') 
+
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    today = datetime.date.today().strftime('%Y-%m-%d')
-    cursor.execute("SELECT last_scan_date FROM users WHERE user_id=?", (user_id,))
-    res = cursor.fetchone()
-    last_date_str = res[0] if res else today
     
-    try:
-        last_date = datetime.datetime.strptime(last_date_str, '%Y-%m-%d').date()
-    except:
-        last_date = datetime.date.today()
+    cursor.execute("SELECT free_scans_used, is_premium, premium_expiry, last_scan_date FROM users WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+    
+    current_date = datetime.datetime.now().date()
 
-    if last_date < datetime.date.today():
-        current_used = 0
-        cursor.execute("UPDATE users SET free_scans_used=0, last_scan_date=? WHERE user_id=?", (today, user_id))
+    if data is None:
+        cursor.execute("INSERT INTO users (user_id, username, last_scan_date) VALUES (?, ?, ?)", (user_id, username, current_date.strftime('%Y-%m-%d')))
         conn.commit()
+        data = (0, 0, None, current_date.strftime('%Y-%m-%d'))
+    else:
+        free_scans_used, is_premium, premium_expiry, last_scan_date_str = data
+        
+        cursor.execute("UPDATE users SET username = ? WHERE user_id=?", (username, user_id))
+        
+        if is_premium == 0:
+            if last_scan_date_str:
+                try:
+                    last_scan_date = datetime.datetime.strptime(last_scan_date_str.split()[0], '%Y-%m-%d').date()
+                    if (current_date - last_scan_date).days >= 1:
+                        cursor.execute("UPDATE users SET free_scans_used = 0, last_scan_date = ? WHERE user_id = ?", 
+                                       (current_date.strftime('%Y-%m-%d'), user_id))
+                        free_scans_used = 0
+                        last_scan_date_str = current_date.strftime('%Y-%m-%d')
+                except ValueError:
+                    cursor.execute("UPDATE users SET free_scans_used = 0, last_scan_date = ? WHERE user_id = ?", 
+                                   (current_date.strftime('%Y-%m-%d'), user_id))
+                    free_scans_used = 0
+                    last_scan_date_str = current_date.strftime('%Y-%m-%d')
+        
+        data = (free_scans_used, is_premium, premium_expiry, last_scan_date_str)
+        conn.commit()
+
     conn.close()
-    return current_used
+    return data
 
 def update_scan_count(user_id):
-    if user_id == ADMIN_ID: return
+    """Scan count එක වැඩි කරයි."""
+    current_date = datetime.datetime.now().strftime('%Y-%m-%d')
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    today = datetime.date.today().strftime('%Y-%m-%d')
-    cursor.execute("UPDATE users SET free_scans_used = free_scans_used + 1, last_scan_date=? WHERE user_id=?", (today, user_id))
+    cursor.execute("UPDATE users SET free_scans_used = free_scans_used + 1, last_scan_date = ? WHERE user_id=?", 
+                   (current_date, user_id))
     conn.commit()
     conn.close()
 
-# ----------------------------------------------------
-# --- 4. UTILITY FUNCTIONS ---
-# ----------------------------------------------------
 
-def premium_required(func):
-    def wrapper(message, *args, **kwargs):
-        user_id = message.from_user.id
-        username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{message.from_user.id}"
-        
-        if not check_membership(user_id):
-            send_join_channel_message(message)
-            return
-        if user_id == ADMIN_ID: return func(message, *args, **kwargs)
-
-        check_premium_expiry(user_id)
-        _, is_premium, _ = get_user_status(user_id, username)
-        
-        if is_premium == 0:
-            bot.reply_to(message, PREMIUM_MESSAGE, parse_mode='HTML')
-            return
-        return func(message, *args, **kwargs)
-    return wrapper
-
-def free_scan_check(func):
-    def wrapper(message, *args, **kwargs):
-        user_id = message.from_user.id
-        username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{message.from_user.id}"
-
-        if not check_membership(user_id):
-            send_join_channel_message(message)
-            return
-        if user_id == ADMIN_ID: return func(message, *args, **kwargs)
-            
-        check_premium_expiry(user_id)
-        scans_used, is_premium, _ = get_user_status(user_id, username)
-        scans_used = check_and_reset_daily_limit(user_id, scans_used)
-
-        if is_premium == 1: return func(message, *args, **kwargs)
-        if scans_used >= FREE_SCAN_LIMIT:
-            bot.reply_to(message, PREMIUM_MESSAGE, parse_mode='HTML')
-            return
-
-        result = func(message, *args, **kwargs)
-        update_scan_count(user_id)
-        return result
-    return wrapper
-
-# ... (Insert `get_isp_info`, `fetch_subdomains`, `scan_target` from previous code here to save space. They are essential.)
-# For this full code, I will use simplified versions for brevity but they are fully functional.
+# --- Core Utility Functions (Scanning) ---
 
 def get_isp_info(ip):
+    """IP address එකේ ISP තොරතුරු ලබා ගනී."""
     try:
-        r = requests.get(f"http://ip-api.com/json/{ip}?fields=isp,org,countryCode", timeout=2).json()
-        return f"{r.get('isp')} ({r.get('countryCode')})"
-    except: return "Unknown"
+        url = f"http://ip-api.com/json/{ip}?fields=isp,org,as,countryCode"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            isp = data.get('isp', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
+            country = data.get('countryCode', 'XX')
+            return f"{isp} ({data.get('as', '')}) [🇨{country}]"
+    except:
+        return "Unknown ISP"
+    return "Unknown ISP"
 
-def scan_port_simple(ip, port):
+def generate_predictive_subdomains(domain, passive_list):
+    """AI Wordlist භාවිතයෙන් Subdomains ජනනය කරයි."""
+    new_hosts = set()
+    for word in PREDICTIVE_WORDLIST:
+        new_host = f"{word}.{domain}"
+        if new_host not in passive_list:
+             new_hosts.add(new_host)
+    passive_list.extend(list(new_hosts))
+    return passive_list
+
+def fetch_subdomains(domain):
+    """Certificate Transparency Logs භාවිතයෙන් Subdomains ලබා ගනී."""
+    subdomains = set()
+    crt_url = f"https://crt.sh/?q=%.{domain}&output=json"
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1.0)
-        res = s.connect_ex((ip, port))
-        s.close()
-        return res == 0
-    except: return False
-
-def generate_ml_based_subdomains(domain):
-    ml_hosts = set(f"{word}.{domain}" for word in PREDICTIVE_WORDLIST)
-    if "api" not in domain: ml_hosts.add(f"api.{domain}")
-    return list(ml_hosts)
-
-# ----------------------------------------------------
-# --- 5. NEW ULTRA PRO PREMIUM FEATURES ---
-# ----------------------------------------------------
-
-# 1. WAF Detector (/waf)
-@bot.message_handler(commands=['waf'])
-@premium_required
-def handle_waf_check(message):
-    try:
-        domain = message.text.split()[1].strip()
-        log_activity(message.from_user.id, domain, "WAF Check")
-        msg = bot.reply_to(message, f"🛡️ Analyzing WAF for <b>{domain}</b>...", parse_mode='HTML')
-        
-        target = f"http://{domain}"
-        r = requests.get(target, timeout=5)
-        headers = r.headers
-        
-        waf_result = "✅ No obvious WAF detected."
-        server = headers.get('Server', '').lower()
-        cdn_headers = ['cf-ray', 'x-amz-cf-id', 'x-akamai-transformed', 'server']
-        
-        if 'cloudflare' in server: waf_result = "⚠️ <b>Cloudflare WAF/CDN</b> Detected!"
-        elif 'akamai' in server: waf_result = "⚠️ <b>Akamai CDN</b> Detected!"
-        elif any(h in headers for h in cdn_headers if 'cf-' in h): waf_result = "⚠️ <b>Cloudflare</b> Detected!"
-        
-        reply = f"🛡️ <b>WAF/CDN Report: {domain}</b>\n\n"
-        reply += f"Status: {waf_result}\n"
-        reply += f"Server Header: <code>{headers.get('Server', 'Hidden')}</code>\n"
-        reply += f"Powered By: <code>{headers.get('X-Powered-By', 'None')}</code>\n"
-        
-        bot.edit_message_text(reply, message.chat.id, msg.message_id, parse_mode='HTML')
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error: {e}")
-
-# 2. SSL Inspector (/ssl)
-@bot.message_handler(commands=['ssl'])
-@premium_required
-def handle_ssl_check(message):
-    try:
-        domain = message.text.split()[1].strip()
-        log_activity(message.from_user.id, domain, "SSL Check")
-        msg = bot.reply_to(message, f"🔒 Inspecting SSL for <b>{domain}</b>...", parse_mode='HTML')
-        
-        ctx = ssl.create_default_context()
-        with socket.create_connection((domain, 443)) as sock:
-            with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
-                cert = ssock.getpeercert()
-                
-        subject = dict(x[0] for x in cert['subject'])
-        issuer = dict(x[0] for x in cert['issuer'])
-        expiry = cert['notAfter']
-        
-        reply = f"🔒 <b>SSL Certificate Details: {domain}</b>\n\n"
-        reply += f"👤 <b>Common Name:</b> <code>{subject.get('commonName')}</code>\n"
-        reply += f"🏢 <b>Issuer:</b> {issuer.get('organizationName')}\n"
-        reply += f"📅 <b>Expires:</b> {expiry}\n"
-        reply += f"🔢 <b>Version:</b> {cert.get('version')}\n"
-        
-        bot.edit_message_text(reply, message.chat.id, msg.message_id, parse_mode='HTML')
-    except Exception as e:
-        bot.reply_to(message, f"❌ SSL Error: {e}")
-
-# 3. Whois/IP Info (/whois)
-@bot.message_handler(commands=['whois'])
-@premium_required
-def handle_whois(message):
-    try:
-        target = message.text.split()[1].strip()
-        log_activity(message.from_user.id, target, "Whois Check")
-        
-        # Check if input is domain, resolve to IP
-        try:
-            ip = socket.gethostbyname(target)
-        except:
-            ip = target # Assume it's already an IP
-            
-        r = requests.get(f"http://ip-api.com/json/{ip}", timeout=5).json()
-        
-        if r['status'] == 'fail':
-            bot.reply_to(message, "❌ Invalid IP/Domain.")
-            return
-            
-        reply = f"🌍 <b>Whois/IP Info: {target}</b>\n\n"
-        reply += f"📍 <b>IP:</b> <code>{r['query']}</code>\n"
-        reply += f"🏳️ <b>Country:</b> {r['country']} ({r['countryCode']})\n"
-        reply += f"🏢 <b>ISP:</b> {r['isp']}\n"
-        reply += f"📡 <b>AS:</b> {r['as']}\n"
-        reply += f"🏙️ <b>City:</b> {r['city']}\n"
-        
-        bot.reply_to(message, reply, parse_mode='HTML')
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error: {e}")
-
-# 4. Custom Port Scan (/port)
-@bot.message_handler(commands=['port'])
-@premium_required
-def handle_custom_port(message):
-    try:
-        # Input: /port domain.com 22,53,80
-        parts = message.text.split()
-        domain = parts[1].strip()
-        ports_str = parts[2].strip()
-        ports = [int(p) for p in ports_str.split(',')]
-        
-        log_activity(message.from_user.id, domain, f"Custom Ports: {ports_str}")
-        msg = bot.reply_to(message, f"⚙️ Scanning custom ports on <b>{domain}</b>...", parse_mode='HTML')
-        
-        ip = socket.gethostbyname(domain)
-        result_txt = f"⚙️ <b>Custom Port Results: {domain}</b>\nIP: <code>{ip}</code>\n\n"
-        
-        for p in ports:
-            status = "✅ OPEN" if scan_port_simple(ip, p) else "❌ CLOSED"
-            result_txt += f" • Port {p}: {status}\n"
-            
-        bot.edit_message_text(result_txt, message.chat.id, msg.message_id, parse_mode='HTML')
-        
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(crt_url, headers=headers, timeout=15)
+        if response.status_code == 200 and response.text:
+            data = response.json()
+            for entry in data:
+                name_value = entry.get('name_value', '')
+                if name_value:
+                    for sub in name_value.split('\n'):
+                        if sub.strip() and "*" not in sub:
+                            subdomains.add(sub.strip())
     except Exception:
-        bot.reply_to(message, "Usage: <code>/port domain.com 22,80,443</code>", parse_mode='HTML')
+        pass
 
-# 5. Admin Dashboard (Enhanced)
-@bot.message_handler(commands=['admin'])
-def handle_admin_dashboard(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "🚫 Admin Only.")
-        return
+    # Fallback to HackerTarget if crt.sh fails or yields no results
+    if not subdomains:
+        hackertarget_url = f"https://api.hackertarget.com/hostsearch/?q={domain}"
+        try:
+            response = requests.get(hackertarget_url, timeout=10)
+            if response.status_code == 200 and "API count exceeded" not in response.text:
+                lines = response.text.splitlines()
+                for line in lines:
+                    parts = line.split(',')
+                    if len(parts) > 0 and 'error' not in parts[0].lower() and '*' not in parts[0]:
+                        subdomains.add(parts[0].strip())
+        except Exception:
+            pass
+            
+    return list(subdomains)
+
+def scan_target(host):
+    """තනි Host එකක Ports Scan කරයි."""
+    data = {
+        "host": host, "ip": "N/A", "ports": [], "server": "Unknown", "status": "Offline", "isp": "N/A"
+    }
+    
+    try:
+        ip = socket.gethostbyname(host)
+        data["ip"] = ip
+        data["status"] = "Online"
         
+        for port in DEFAULT_PORTS:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(TIMEOUT)
+            result = sock.connect_ex((ip, port))
+            
+            if result == 0:
+                data["ports"].append(port)
+                # Attempt to grab Server header (for 80/443)
+                if port in [80, 443] and data["server"] == "Unknown":
+                    try:
+                        if port == 443:
+                            context = ssl.create_default_context()
+                            context.check_hostname = False
+                            context.verify_mode = ssl.CERT_NONE
+                            with socket.create_connection((ip, port), timeout=TIMEOUT) as s:
+                                with context.wrap_socket(s, server_hostname=host) as ssock:
+                                    ssock.send(f"HEAD / HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
+                                    resp = ssock.read(1024).decode('utf-8', errors='ignore')
+                        else:
+                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            s.settimeout(TIMEOUT)
+                            s.connect((ip, port))
+                            s.send(f"HEAD / HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
+                            resp = s.recv(1024).decode('utf-8', errors='ignore')
+                            s.close()
+                        
+                        for line in resp.split("\r\n"):
+                                if line.lower().startswith("server:"):
+                                    data["server"] = line.split(":", 1)[1].strip()
+                    except Exception:
+                        pass 
+                        
+            sock.close()
+            
+        if data["ports"]:
+            data["isp"] = get_isp_info(ip)
+
+    except:
+        pass
+        
+    return data
+
+# ----------------------------------------------------
+# --- TELEGRAM BOT HANDLERS ---
+# ----------------------------------------------------
+
+def create_main_keyboard(user_id):
+    """ප්‍රධාන Reply Keyboard එක නිර්මාණය කරයි (Admin Buttons ඇතුළත්)."""
+    markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btn_scan = KeyboardButton('/scan')
+    btn_status = KeyboardButton('/status')
+    btn_premium = KeyboardButton('/premium')
+    markup.add(btn_scan)
+    markup.add(btn_status, btn_premium)
+    
+    if user_id == ADMIN_ID:
+        btn_grant = KeyboardButton('👑 Grant Access') 
+        btn_revoke = KeyboardButton('🗑️ Revoke Access')
+        btn_broadcast = KeyboardButton('📢 Broadcast')
+        btn_searchlogs = KeyboardButton('🔍 Search Logs')
+        
+        markup.add(btn_grant, btn_revoke)
+        markup.add(btn_broadcast, btn_searchlogs)
+        markup.add(KeyboardButton('/admin'))
+    
+    return markup
+
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    user_id = message.from_user.id
+    username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{user_id}"
+    
+    setup_db() 
+    get_user_status(user_id, username) 
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+    
+    bot.reply_to(message, WELCOME_MESSAGE, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+@bot.message_handler(commands=['premium'])
+def handle_premium_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+        
+    bot.reply_to(message, PREMIUM_MESSAGE, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+@bot.message_handler(commands=['status'])
+def handle_status_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+        
+    username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{user_id}"
+    
+    check_premium_expiry(user_id)
+    free_scans_used, is_premium, premium_expiry, last_scan_date_str = get_user_status(user_id, username) 
+    
+    status_msg = (
+        f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
+        f"🔥 <b>තත්ත්වය / Status:</b> {'👑 Premium User' if is_premium == 1 else '⚡️ Free User'}\n"
+    )
+    
+    if is_premium == 0:
+        remaining = FREE_SCAN_LIMIT - free_scans_used
+        status_msg += (
+            f"🔍 <b>ඉතිරි Scans / Scans Remaining:</b> <b>{remaining}</b> / {FREE_SCAN_LIMIT}\n"
+            f"📅 <b>අවසන් Scans කළ දිනය:</b> {last_scan_date_str.split()[0] if last_scan_date_str else 'N/A'}\n\n"
+        )
+        if remaining <= 0:
+            status_msg += "⚠️ ඔබගේ Free Scan සීමාව අවසන්. හෙට දින නැවත උත්සාහ කරන්න හෝ Premium වෙත මාරු වන්න! / Your Free Scan limit is exhausted. Try again tomorrow or Upgrade to Premium!"
+    else:
+        status_msg += f"📅 <b>කල් ඉකුත් වීමේ දිනය:</b> {premium_expiry.split()[0] if premium_expiry else 'N/A'}\n"
+        status_msg += "✅ <b>Scans:</b> අසීමිතයි (Unlimited)"
+
+    bot.reply_to(message, status_msg, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+@bot.message_handler(commands=['admin'])
+def handle_admin_command(message):
+    
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "🚫 ඔබට මෙම විධානය භාවිත කළ නොහැක.")
+        return
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # 1. Total Users
+    cursor.execute("SELECT user_id, username, is_premium, premium_expiry, free_scans_used FROM users WHERE user_id != ?", (ADMIN_ID,))
+    all_users_data = cursor.fetchall()
+    
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
+
+    premium_users_list = []
+    premium_users_count = 0
     
-    # 2. Premium Users
-    cursor.execute("SELECT COUNT(*) FROM users WHERE is_premium=1")
-    prem_users = cursor.fetchone()[0]
-    
-    # 3. Recent 10 Search Logs
-    cursor.execute("SELECT u.username, s.domain, s.command_type, s.timestamp FROM scan_logs s JOIN users u ON s.user_id = u.user_id ORDER BY s.log_id DESC LIMIT 10")
-    logs = cursor.fetchall()
-    
-    msg = f"👮‍♂️ <b>ULTRA ADMIN DASHBOARD</b>\n"
-    msg += f"-----------------------------------\n"
-    msg += f"👥 Total Users: <b>{total_users}</b>\n"
-    msg += f"👑 Premium Users: <b>{prem_users}</b>\n"
-    msg += f"-----------------------------------\n"
-    msg += f"📋 <b>Recent Activity (Last 10):</b>\n\n"
-    
-    if logs:
-        for uname, dom, cmd, ts in logs:
-            clean_time = ts.split(' ')[1][:5]
-            msg += f"🕒 {clean_time} | {uname} | {cmd}\n   ↳ <code>{dom}</code>\n\n"
-    else:
-        msg += "<i>No recent activity.</i>"
+    for data in all_users_data:
+        user_id, username, is_premium, expiry, free_scans_used = data
         
-    conn.close()
-    bot.reply_to(message, msg, parse_mode='HTML')
-
-# --- Existing Free Handlers (Scan, DNS, Header, etc.) ---
-# These handlers also need to log activity now.
-
-# --- 👑 ADMIN BROADCAST FEATURE (FIXED) ---
-
-@bot.message_handler(commands=['broadcast'])
-def handle_broadcast_command(message):
-    # 1. Admin Check with Debugging
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, f"⛔ <b>Access Denied!</b>\nඔබ Admin නොවේ.\nYour ID: <code>{message.from_user.id}</code>\nConfigured Admin ID: <code>{ADMIN_ID}</code>", parse_mode='HTML')
-        return
-
-    msg = bot.reply_to(message, "📢 <b>Broadcast Message:</b>\nසියලුම පරිශීලකයින්ට යැවීමට අවශ්‍ය පණිවිඩය ඇතුළත් කරන්න.\n(Enter the message to send to ALL users. /start to cancel)", parse_mode='HTML')
-    bot.register_next_step_handler(msg, process_broadcast)
-
-def process_broadcast(message):
-    if message.text == '/start':
-        bot.reply_to(message, "Broadcast Cancelled.")
-        return
-
-    broadcast_text = message.text
+        user_display_name = username.replace('@', '') if username and not username.startswith('ID_') else f"ID: {user_id}"
+        clickable_link = f"<a href='tg://user?id={user_id}'>{user_display_name}</a>"
+        expiry_display = expiry.split()[0] if expiry else "N/A"
+        
+        if is_premium == 1:
+            user_line = f"  • {clickable_link} | Expiry: {expiry_display}"
+            premium_users_list.append(user_line)
+            premium_users_count += 1
+        
+    admin_msg = f"👑 <b>Admin Dashboard</b>\n"
+    admin_msg += f"----------------------------------------\n"
+    admin_msg += f"👥 <b>Total Users (සියලුම):</b> {total_users}\n"
+    admin_msg += f"🌟 <b>Premium Users:</b> {premium_users_count} (+ Admin)\n"
+    admin_msg += f"----------------------------------------\n"
     
-    # 2. Fetch Users safely
+    admin_msg += f"📋 <b>Active Premium List ({premium_users_count} Users):</b>\n"
+    if premium_users_list:
+        admin_msg += "\n".join(premium_users_list[:5])
+        if len(premium_users_list) > 5:
+            admin_msg += f"\n<i>... තවත් {len(premium_users_list) - 5}ක් ඇත.</i>"
+    else:
+        admin_msg += "<i>❌ කිසිවෙක් නැත. / None.</i>\n"
+        
+    admin_msg += f"\n----------------------------------------\n"
+    
+    cursor.execute("""
+        SELECT u.username, s.domain, s.timestamp 
+        FROM scan_logs s
+        JOIN users u ON s.user_id = u.user_id
+        ORDER BY s.log_id DESC 
+        LIMIT 5
+    """)
+    recent_logs = cursor.fetchall()
+    
+    conn.close() 
+
+    admin_msg += f"🕵️ <b>Recent 5 Searches (නවතම Scans):</b>\n"
+    if recent_logs:
+        log_list = []
+        for username, domain, timestamp in recent_logs:
+            time_only = timestamp.split(' ')[1][:5] 
+            user_display = username if username else f"ID_{recent_logs.index((username, domain, timestamp))+1}"
+            log_list.append(f"  • {time_only} | {user_display} ➡️ <code>{domain}</code>")
+        
+        admin_msg += "\n".join(log_list)
+    else:
+        admin_msg += "<i>❌ කිසිදු සෙවීමක් ලොග් වී නැත. / No searches logged.</i>"
+    
+    admin_msg += "\n\n**සම්පූර්ණ Log (Full Log) සඳහා '🔍 Search Logs' ඔබන්න.**"
+
+    bot.reply_to(message, admin_msg, parse_mode='HTML', reply_markup=create_main_keyboard(ADMIN_ID))
+
+
+@bot.message_handler(commands=['searchlogs'])
+@bot.message_handler(func=lambda message: message.text == '🔍 Search Logs')
+def handle_searchlogs_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "🚫 ඔබට මෙම විධානය භාවිත කළ නොහැක.")
+        return
+        
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users")
-    users = cursor.fetchall()
+    
+    cursor.execute("""
+        SELECT u.username, s.domain, s.timestamp 
+        FROM scan_logs s
+        JOIN users u ON s.user_id = u.user_id
+        ORDER BY s.log_id DESC 
+        LIMIT 20
+    """)
+    recent_logs = cursor.fetchall()
     conn.close()
     
-    user_ids = [user[0] for user in users]
+    logs_msg = "🕵️ <b>Recent 20 Scan Logs (නවතම සෙවීම්):</b>\n"
+    logs_msg += "----------------------------------------\n"
     
-    if not user_ids:
-        bot.reply_to(message, "❌ <b>Database Error:</b> කිසිදු පරිශීලකයෙක් සොයාගත නොහැකි විය. (No users found in DB).", parse_mode='HTML')
-        return
+    if recent_logs:
+        log_list = []
+        for index, (username, domain, timestamp) in enumerate(recent_logs):
+            date_time = timestamp.split(' ')
+            date = date_time[0].split('-')[1] + '-' + date_time[0].split('-')[2] 
+            time_only = date_time[1][:5] 
+            
+            user_display = username if username and not username.startswith('ID_') else f"ID_{index+1}"
+            
+            log_list.append(f"  [{date} {time_only}] <b>{user_display}</b> ➡️ <code>{domain}</code>")
+        
+        logs_msg += "\n".join(log_list)
+    else:
+        logs_msg += "<i>❌ කිසිදු සෙවීමක් ලොග් වී නැත. / No searches logged.</i>"
+    
+    logs_msg += "\n----------------------------------------"
+
+    bot.reply_to(message, logs_msg, parse_mode='HTML', reply_markup=create_main_keyboard(ADMIN_ID))
+
+
+@bot.message_handler(commands=['broadcast'])
+@bot.message_handler(func=lambda message: message.text == '📢 Broadcast')
+def start_broadcast(message):
+    if message.from_user.id != ADMIN_ID: return
+
+    markup = telebot.types.ForceReply(selective=False)
+    msg = bot.reply_to(message, "💬 **Broadcasting පණිවිඩය ඇතුළත් කරන්න:**\n(HTML format භාවිතා කළ හැක.)", parse_mode='HTML', reply_markup=markup)
+    bot.register_next_step_handler(msg, process_broadcast_message)
+
+def process_broadcast_message(message):
+    if message.text == '/start': return send_welcome(message)
+        
+    broadcast_text = message.text
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id != ?", (ADMIN_ID,))
+    users = cursor.fetchall()
+    conn.close()
     
     sent_count = 0
     failed_count = 0
     
-    status_msg = bot.reply_to(message, f"🚀 Broadcast ආරම්භ විය... Users: {len(user_ids)}")
+    bot.send_message(message.chat.id, f"📡 **Broadcasting ආරම්භ කළා.** පරිශීලකයින් {len(users)} ට යවනු ලැබේ...", parse_mode='HTML')
     
-    # 3. Sending Loop with Error Handling
-    for uid in user_ids:
+    for user in users:
+        user_id = user[0]
         try:
-            bot.send_message(uid, f"📢 <b>Announcement / නිවේදනය:</b>\n\n{broadcast_text}", parse_mode='HTML')
+            bot.send_message(user_id, broadcast_text, parse_mode='HTML')
             sent_count += 1
-            time.sleep(0.1) # Flood Limit පාලනයට කුඩා විරාමයක්
-        except Exception as e:
-            # User blocked the bot or account deleted
+            time.sleep(0.05) 
+        except ApiTelegramException:
             failed_count += 1
-            print(f"Failed to send to {uid}: {e}")
-            
-    bot.reply_to(message, f"✅ <b>Broadcast Complete!</b>\n\n🟢 Sent: {sent_count}\n🔴 Failed: {failed_count} (Blocked/Deleted)", parse_mode='HTML')
+        except Exception:
+            failed_count += 1
+
+    final_msg = f"✅ **Broadcasting අවසන්.**\n✅ **සාර්ථකයි / Sent:** {sent_count}\n❌ **අසාර්ථකයි / Failed:** {failed_count}\n"
+    
+    bot.send_message(message.chat.id, final_msg, parse_mode='HTML', reply_markup=create_main_keyboard(ADMIN_ID))
+
+@bot.message_handler(func=lambda message: message.text == '👑 Grant Access')
+def grant_access_start(message):
+    if message.from_user.id != ADMIN_ID: return
+    msg = bot.reply_to(message, "👤 **Premium ලබා දීමට අවශ්‍ය පරිශීලකයාගේ Username (<code>@user</code>) හෝ User ID එක ඇතුළත් කරන්න:**", parse_mode='HTML')
+    bot.register_next_step_handler(msg, get_username_grant)
+
+def get_username_grant(message):
+    if message.text == '/start': return send_welcome(message)
+    target_identifier = message.text.strip()
+    target_user_id = get_id_by_username(target_identifier)
+
+    if not target_user_id:
+        msg = bot.reply_to(message, f"❌ <b>'{target_identifier}'</b> සමඟ ගැලපෙන පරිශීලකයෙකු සොයා ගැනීමට නොහැක. නැවත උත්සාහ කරන්න. / User not found. Try again.", parse_mode='HTML')
+        return bot.register_next_step_handler(msg, get_username_grant)
+    
+    msg = bot.reply_to(message, f"📅 <b>{target_identifier}</b> ට දින කීයක් (උදා: 30) සඳහා Access ලබා දිය යුතුද?", parse_mode='HTML')
+    bot.register_next_step_handler(msg, get_days_grant, target_user_id)
+
+def get_days_grant(message, target_user_id):
+    if message.text == '/start': return send_welcome(message)
+    try:
+        days = int(message.text.strip())
+        if days <= 0: raise ValueError
+    except ValueError:
+        msg = bot.reply_to(message, "❌ කරුණාකර දින ගණන නිවැරදි ඉලක්කමකින් ඇතුළත් කරන්න.", parse_mode='HTML')
+        return bot.register_next_step_handler(msg, get_days_grant, target_user_id)
+
+    grant_premium_access(target_user_id, days)
+    bot.reply_to(message, f"✅ **සාර්ථකයි! / Success!**\n<b>{target_user_id}</b> ට දින <b>{days}</b>ක් සඳහා Premium Access ලබා දෙන ලදි.", parse_mode='HTML', reply_markup=create_main_keyboard(ADMIN_ID))
+
+
+@bot.message_handler(func=lambda message: message.text == '🗑️ Revoke Access')
+def revoke_access_start(message):
+    if message.from_user.id != ADMIN_ID: return
+    msg = bot.reply_to(message, "👤 **Premium Access ඉවත් කිරීමට අවශ්‍ය පරිශීලකයාගේ Username (<code>@user</code>) හෝ User ID එක ඇතුළත් කරන්න:**", parse_mode='HTML')
+    bot.register_next_step_handler(msg, get_username_revoke)
+
+def get_username_revoke(message):
+    if message.text == '/start': return send_welcome(message)
+    target_identifier = message.text.strip()
+    target_user_id = get_id_by_username(target_identifier)
+
+    if not target_user_id:
+        msg = bot.reply_to(message, f"❌ <b>'{target_identifier}'</b> සමඟ ගැලපෙන පරිශීලකයෙකු සොයා ගැනීමට නොහැක. නැවත උත්සාහ කරන්න.", parse_mode='HTML')
+        return bot.register_next_step_handler(msg, get_username_revoke)
+
+    revoke_premium_access(target_user_id, reason_si="Admin විසින් අවලංගු කරන ලදි", reason_en="revoked by Admin")
+    
+    bot.reply_to(message, f"🗑️ **සාර්ථකයි! / Success!**\n<b>{target_identifier}</b> ගේ Premium Access වහාම ඉවත් කරන ලදි.", parse_mode='HTML', reply_markup=create_main_keyboard(ADMIN_ID))
+
 
 # ----------------------------------------------------
-# --- START BOT ---
+# --- SCAN COMMAND HANDLER ---
+# ----------------------------------------------------
+
+@bot.message_handler(commands=['scan'])
+def handle_scan_command(message):
+    user_id = message.from_user.id
+    
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+        
+    username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{user_id}"
+    
+    check_premium_expiry(user_id)
+    free_scans_used, is_premium, _, _ = get_user_status(user_id, username) 
+    
+    if is_premium == 0 and free_scans_used >= FREE_SCAN_LIMIT:
+        return bot.reply_to(message, PREMIUM_MESSAGE, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+    try:
+        command_parts = message.text.split()
+        if len(command_parts) < 2:
+            return bot.reply_to(message, "කරුණාකර Domain නාමයක් ඇතුළත් කරන්න. උදා: <code>/scan zoom.us</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+        
+        target_domain = command_parts[1].strip()
+        
+        thread = threading.Thread(target=start_scan_task, args=(message, target_domain, is_premium))
+        thread.start()
+
+    except Exception as e:
+        bot.reply_to(message, f"සමාවෙන්න! විධානය ක්‍රියාත්මක කිරීමේදී දෝෂයක් සිදුවිය: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+def start_scan_task(message, target_domain, is_premium):
+    user_id = message.from_user.id
+    output_results = []
+    
+    log_scan_request(user_id, target_domain)
+    
+    try:
+        status_msg = bot.reply_to(message, f"🔎 <b>{target_domain}</b> සඳහා SNI සහ Port Scan කිරීම ආරම්භ කරයි. කරුණාකර රැදී සිටින්න...", parse_mode='HTML')
+        
+        passive_sni_list = fetch_subdomains(target_domain)
+        final_sni_list = generate_predictive_subdomains(target_domain, passive_sni_list)
+        
+        if not final_sni_list:
+            return bot.edit_message_text("❌ කිසිදු SNI Host එකක් සොයා ගැනීමට නොහැකි විය.", message.chat.id, status_msg.message_id)
+
+        bot.edit_message_text(f"✅ Host <b>{len(final_sni_list)}</b> ක් සොයා ගන්නා ලදී. දැන් Port Scanning ආරම්භ වේ...", message.chat.id, status_msg.message_id, parse_mode='HTML')
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            results = list(executor.map(scan_target, final_sni_list))
+
+            for res in results:
+                if res["status"] == "Online" and res["ports"]:
+                    cdn_status = "☁️ CDN/Proxy" if "cloud" in res['server'].lower() or "akamai" in res['server'].lower() else "💻 Direct/Local"
+                    ports_str = ", ".join(map(str, res['ports']))
+                    
+                    risk_flag = "⚠️ <b>High Risk Port Detected!</b>" if any(port in res['ports'] for port in CRITICAL_PORTS) else ""
+                    
+                    formatted_result_string = (
+                        f"<b>{res['host']}</b>\n"
+                        f"  IP: <code>{res['ip']}</code>\n"
+                        f"  Ports: <code>{ports_str}</code>\n"
+                        f"  Server: {res['server'][:20]} ({cdn_status})\n"
+                        f"  ISP: {res['isp']}\n"
+                        f"  {risk_flag}\n"
+                    )
+                    output_results.append(formatted_result_string)
+
+        limit_message = ""
+        
+        if is_premium == 0:
+            update_scan_count(user_id)
+            if len(output_results) > FREE_HOST_LIMIT:
+                output_results = output_results[:FREE_HOST_LIMIT]
+                limit_message = f"\n⚠️ <b>Free Trial</b> සීමාව නිසා <b>Hosts {FREE_HOST_LIMIT}ක්</b> පමණක් පෙන්වයි."
+            
+        
+        if not output_results:
+            final_message = "🤷‍♂️ ස්කෑන් කිරීම අවසන්. කිසිදු විවෘත Host එකක් සොයා ගැනීමට නොහැකි විය."
+            return bot.edit_message_text(final_message, message.chat.id, status_msg.message_id, parse_mode='HTML')
+
+        header = f"🔥 <b>{target_domain}</b> සඳහා සොයාගත් Hosts ({len(output_results)}/{len(final_sni_list)} Online)\n" + ("="*30) + "\n"
+        footer = limit_message + "\n" + ("="*30) + "\n<i>Scan complete.</i>"
+        
+        chunks = []
+        current_chunk = header
+        
+        for result_line in output_results:
+            if len(current_chunk) + len(result_line) + 500 > 4096: 
+                chunks.append(current_chunk) 
+                current_chunk = result_line
+            else:
+                current_chunk += result_line
+
+        current_chunk += footer
+        chunks.append(current_chunk)
+
+        first_message = True
+        for chunk in chunks:
+            if first_message:
+                bot.edit_message_text(chunk, message.chat.id, status_msg.message_id, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+                first_message = False
+            else:
+                bot.send_message(message.chat.id, chunk, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, f"සමාවෙන්න! ස්කෑන් කිරීමේදී බරපතල දෝෂයක් සිදුවිය: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+# ----------------------------------------------------
+# --- CALLBACK QUERY HANDLER (Join Check) ---
+# ----------------------------------------------------
+
+@bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
+def check_subscription_callback(call):
+    user_id = call.from_user.id
+    
+    if is_subscribed(user_id):
+        bot.answer_callback_query(call.id, "✅ ස්තූතියි! ඔබට දැන් Bot එක භාවිතා කළ හැක.")
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id, WELCOME_MESSAGE, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+    else:
+        bot.answer_callback_query(call.id, "❌ ඔබ තවමත් Join වී නැත! කරුණාකර Join වී නැවත පරීක්ෂා කරන්න.", show_alert=True)
+
+
+# ----------------------------------------------------
+# --- START THE BOT ---
 # ----------------------------------------------------
 
 if __name__ == '__main__':
-    setup_db()
-    print("Ultra Pro Bot Started...")
+    setup_db() 
+    print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
     
-    # Set commands
-    bot.set_my_commands([
-        BotCommand("scan", "Domain Scan (Free)"),
-        BotCommand("dns", "DNS Lookup (Free)"),
-        BotCommand("header", "Header Check (Free)"),
-        BotCommand("waf", "WAF/CDN Detect (Premium)"),
-        BotCommand("ssl", "SSL Inspect (Premium)"),
-        BotCommand("whois", "IP Info (Premium)"),
-        BotCommand("port", "Custom Port (Premium)"),
-        BotCommand("benefits", "View Premium Features"),
-        BotCommand("admin", "Admin Dashboard"),
-        BotCommand("start", "Restart")
-    ])
+    if CHANNEL_ID == -100123456789:
+         print("🚨 අත්‍යාවශ්‍ය අනතුරු ඇඟවීම: CHANNEL_ID වෙනස් කරන්න! 🚨")
     
-    bot.polling(none_stop=True)
+    try:
+        bot.set_my_commands([
+            telebot.types.BotCommand("/scan", "Domain Scan"),
+            telebot.types.BotCommand("/status", "Current Scan Status"),
+            telebot.types.BotCommand("/premium", "Get Premium Access Details"),
+            telebot.types.BotCommand("/admin", "Admin Dashboard (Admin only)"),
+            telebot.types.BotCommand("/broadcast", "Broadcast Message (Admin only)"),
+            telebot.types.BotCommand("/searchlogs", "View User Search Logs (Admin only)"),
+            telebot.types.BotCommand("/start", "Restart the Bot") 
+        ])
+        bot.polling(none_stop=True, interval=0)
+    except Exception as e:
+        print(f"Bot startup error: {e}")
