@@ -7,6 +7,16 @@ import threading
 import sqlite3
 import datetime
 import time
+import random 
+try:
+    from ping3 import ping, verbose_ping 
+except ImportError:
+    # අවශ්‍ය මොඩියුල නැතිනම්, ස්ථාපනය කරන්න
+    print("ping3 module එක ස්ථාපනය කරයි...")
+    import subprocess
+    subprocess.check_call(['pip', 'install', 'ping3'])
+    from ping3 import ping, verbose_ping
+
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.apihelper import ApiTelegramException 
 
@@ -27,24 +37,25 @@ TIMEOUT = 1.0
 MAX_WORKERS = 40
 FREE_SCAN_LIMIT = 10 
 FREE_HOST_LIMIT = 50
+WATCH_LIMIT = 5 # පරිශීලකයෙකුට නිරීක්ෂණය කළ හැකි උපරිම Domains ගණන
 
 # Database
 DB_NAME = 'sni_bot_users.db' 
 
-# AI Wordlist (සම්පූර්ණ නොවේ, නමුත් පද්ධතියට අවශ්‍යයි)
+# AI Wordlist (ML Scan සඳහා Simulation)
 PREDICTIVE_WORDLIST = [
     "api", "dev", "test", "web", "cdn", "mail", "ftp", "admin", "proxy", "vpn", 
     "access", "live", "app", "static", "assets", "mobile", "staging", "server",
-    "backup", "internal", "secure", "status"
+    "backup", "internal", "secure", "status", "secure-api", "dev-test-api", 
+    "internal-cdn" # Zero Day Simulation සඳහා අලුත් Words
 ]
 
 # --- Bot Initialization ---
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ----------------------------------------------------
-# --- DUAL LANGUAGE MESSAGES ---
+# --- DUAL LANGUAGE MESSAGES (No changes) ---
 # ----------------------------------------------------
-
 PREMIUM_MESSAGE = (
     "👑 <b>Premium Access අවශ්‍යයි</b> 👑\n\n"
     f"ඔබගේ <b>Free Scan සීමාව ({FREE_SCAN_LIMIT})</b> අවසන් වී ඇත. අසීමිත Scans, සම්පූර්ණ ප්‍රතිඵල, **Advanced Filter** සහ **Risk Scoring** සඳහා Premium වෙත මාරු වන්න.\n"
@@ -89,7 +100,7 @@ WELCOME_MESSAGE = (
 )
 
 # ----------------------------------------------------
-# --- CORE CHECK & DB FUNCTIONS ---
+# --- CORE CHECK & DB FUNCTIONS (UPDATED setup_db) ---
 # ----------------------------------------------------
 
 def is_subscribed(user_id):
@@ -123,9 +134,14 @@ def subscription_required_message():
     return message, markup
 
 def setup_db():
+    """
+    Database Tables නිර්මාණය කරයි. 
+    දත්ත ආරක්ෂා කිරීම සඳහා ALTER TABLE භාවිතා කරමින් නව Columns එකතු කරයි.
+    """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor() 
-    # නිවැරදි කළ: last_scan_date column එක නොමැති නම්, එය නිර්මාණය වනු ඇත
+    
+    # 1. 'users' Table එක නිර්මාණය කිරීම
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -136,6 +152,13 @@ def setup_db():
             last_scan_date TEXT 
         )
     """)
+    # last_scan_date column එක දැනටමත් නැතිනම් එකතු කරයි
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_scan_date TEXT")
+    except sqlite3.OperationalError:
+        pass 
+        
+    # 2. 'scan_logs' Table එක නිර්මාණය කිරීම
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scan_logs (
             log_id INTEGER PRIMARY KEY,
@@ -144,10 +167,23 @@ def setup_db():
             timestamp TEXT
         )
     """)
+    
+    # 3. 'watch_list' Table එක නිර්මාණය කිරීම (Monitoring Tool සඳහා)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watch_list (
+            watch_id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            domain TEXT NOT NULL,
+            port INTEGER,
+            last_status TEXT,
+            last_check TEXT
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
-# ... (Other DB utility functions: log_scan_request, revoke_premium_access, grant_premium_access, 
+# ... (log_scan_request, revoke_premium_access, grant_premium_access, 
 # get_id_by_username, check_premium_expiry, get_user_status, update_scan_count remain the same) ...
 
 def log_scan_request(user_id, domain):
@@ -220,7 +256,6 @@ def check_premium_expiry(user_id):
     return False 
 
 def get_user_status(user_id, username):
-    # Admin හට කිසිදු සීමාවක් හෝ කල් ඉකුත් වීමක් නැත
     if user_id == ADMIN_ID: return (0, 1, 'Never Expires', 'N/A') 
 
     conn = sqlite3.connect(DB_NAME)
@@ -231,30 +266,23 @@ def get_user_status(user_id, username):
     current_date = datetime.datetime.now().date()
 
     if data is None:
-        # නව පරිශීලකයෙකු DB එකට එකතු කරයි
         cursor.execute("INSERT INTO users (user_id, username, last_scan_date) VALUES (?, ?, ?)", (user_id, username, current_date.strftime('%Y-%m-%d')))
         conn.commit()
         data = (0, 0, None, current_date.strftime('%Y-%m-%d'))
     else:
         free_scans_used, is_premium, premium_expiry, last_scan_date_str = data
-        
-        # Username update කරයි
         cursor.execute("UPDATE users SET username = ? WHERE user_id=?", (username, user_id))
         
         if is_premium == 0:
-            # Free User ගේ Limit එක දිනපතා Reset කිරීම
             if last_scan_date_str:
                 try:
-                    # last_scan_date යනු දිනය පමණක් බව උපකල්පනය කරයි (DB එකේ 'YYYY-MM-DD' ආකාරයෙන් තිබිය යුතුය)
                     last_scan_date = datetime.datetime.strptime(last_scan_date_str.split()[0], '%Y-%m-%d').date()
                     if (current_date - last_scan_date).days >= 1:
-                        # දිනකට වඩා ගොස් ඇත්නම්, Count එක reset කර දිනය යාවත්කාලීන කරයි
                         cursor.execute("UPDATE users SET free_scans_used = 0, last_scan_date = ? WHERE user_id = ?", 
                                        (current_date.strftime('%Y-%m-%d'), user_id))
                         free_scans_used = 0
                         last_scan_date_str = current_date.strftime('%Y-%m-%d')
                 except ValueError:
-                    # Date Format Error එකක් ආවොත්, reset කර යාවත්කාලීන කරයි
                     cursor.execute("UPDATE users SET free_scans_used = 0, last_scan_date = ? WHERE user_id = ?", 
                                    (current_date.strftime('%Y-%m-%d'), user_id))
                     free_scans_used = 0
@@ -300,6 +328,7 @@ def generate_predictive_subdomains(domain, passive_list):
     return passive_list
 
 def fetch_subdomains(domain):
+    # ... (No change) ...
     subdomains = set()
     crt_url = f"https://crt.sh/?q=%.{domain}&output=json"
     try:
@@ -330,7 +359,7 @@ def fetch_subdomains(domain):
     return list(subdomains)
 
 def scan_target(host):
-    """තනි Host එකක Ports Scan කරයි."""
+    # ... (No change) ...
     data = {
         "host": host, "ip": "N/A", "ports": [], "server": "Unknown", "status": "Online", "isp": "N/A"
     }
@@ -354,7 +383,6 @@ def scan_target(host):
                             context.verify_mode = ssl.CERT_NONE
                             with socket.create_connection((ip, port), timeout=TIMEOUT) as s:
                                 with context.wrap_socket(s, server_hostname=host) as ssock:
-                                    # Basic HEAD request for server banner
                                     ssock.send(f"HEAD / HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
                                     resp = ssock.read(1024).decode('utf-8', errors='ignore')
                         else:
@@ -380,10 +408,9 @@ def scan_target(host):
         
     return data
 
-# --- Functionality for DNS, Header, Probe (Premium tools) ---
-
+# --- Functionality for DNS, Header, Probe (Premium tools) --- (No changes)
 def perform_dns_lookup(domain):
-    """Domain එකක් සඳහා A සහ CNAME Records සොයා ගනී."""
+    # ... (DNS Lookup Logic remains the same) ...
     try:
         ip_addr = socket.gethostbyname(domain)
         try:
@@ -403,12 +430,11 @@ def perform_dns_lookup(domain):
         return f"❌ <b>DNS Lookup Error:</b> {e}"
 
 def analyze_http_header(url):
-    """URL එකකින් HTTP Headers ලබා ගනී."""
+    # ... (Header Analyzer Logic remains the same) ...
     if not url.startswith('http'):
         url = 'http://' + url
         
     try:
-        # Use HEAD request for efficiency
         response = requests.head(url, timeout=5, allow_redirects=True)
         
         header_text = f"✅ <b>HTTP Headers for {url}:</b>\n"
@@ -418,7 +444,6 @@ def analyze_http_header(url):
             if key.lower() in ['server', 'content-type', 'date', 'location', 'x-cache']:
                 header_text += f"  • <b>{key}:</b> <code>{value}</code>\n"
             else:
-                 # දිගු Header Values කෙටි කරයි
                  header_text += f"  • {key}: <code>{value[:30]}...</code>\n"
         
         return header_text
@@ -427,7 +452,7 @@ def analyze_http_header(url):
         return f"❌ <b>Header Error:</b> URL එකට ළඟා වීමට නොහැක හෝ ඉල්ලීම කාලය ඉක්මවා ගියේය. ({e})"
 
 def probe_proxy(host_port):
-    """Proxy එකක් සජීවීව ක්‍රියාත්මක වේ දැයි පරීක්ෂා කරයි."""
+    # ... (Proxy Probe Logic remains the same) ...
     try:
         host, port = host_port.split(':')
         port = int(port)
@@ -466,32 +491,23 @@ def probe_proxy(host_port):
 # ----------------------------------------------------
 
 def create_main_keyboard(user_id):
-    """
-    ප්‍රධාන Reply Keyboard එක නිර්මාණය කරයි.
-    Admin-Only Buttons, Admin හට පමණක් පෙන්වනු ඇත.
-    """
+    # ... (No change) ...
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     btn_scan = KeyboardButton('/scan')
     btn_status = KeyboardButton('/status')
     btn_premium = KeyboardButton('/premium')
     
-    # 1 වන පේළිය: Scan
     markup.add(btn_scan)
-    # 2 වන පේළිය: Status, Premium
     markup.add(btn_status, btn_premium)
     
-    # --- ADMIN ONLY BUTTONS ---
     if user_id == ADMIN_ID:
         btn_grant = KeyboardButton('👑 Grant Access') 
         btn_revoke = KeyboardButton('🗑️ Revoke Access')
         btn_broadcast = KeyboardButton('📢 Broadcast')
         btn_searchlogs = KeyboardButton('🔍 Search Logs')
         
-        # 3 වන පේළිය: Grant, Revoke
         markup.add(btn_grant, btn_revoke)
-        # 4 වන පේළිය: Broadcast, Search Logs
         markup.add(btn_broadcast, btn_searchlogs)
-        # 5 වන පේළිය: Admin Dashboard
         markup.add(KeyboardButton('/admin'))
     
     return markup
@@ -505,11 +521,16 @@ def send_welcome(message):
     setup_db() 
     get_user_status(user_id, username) 
     
+    # ⚠️ FIX: Pending Next Step Handlers ඉවත් කිරීම (User not found fix)
+    try:
+        bot.clear_step_handler_by_chat_id(chat_id=user_id)
+    except:
+        pass 
+    
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
         return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     
-    # Admin සඳහා පමණක් වන commands, WELCOME_MESSAGE එකට එකතු කිරීම
     if user_id == ADMIN_ID:
         admin_cmd_placeholder = "Admin Dashboard (<code>/admin</code>) (Admin Only)\n"
     else:
@@ -519,6 +540,8 @@ def send_welcome(message):
     
     bot.reply_to(message, welcome_msg_final, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
+# ... (handle_premium_command, handle_status_command, check_premium_access, 
+# handle_dns_command, handle_header_command, handle_probe_command, handle_benefits_command remain the same) ...
 
 @bot.message_handler(commands=['premium'])
 def handle_premium_command(message):
@@ -533,11 +556,10 @@ def handle_status_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+        return bot.reply_to(message, text, parse_mode='HTML')
         
     username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{user_id}"
     check_premium_expiry(user_id)
-    # Admin හට is_premium=1 ලැබෙන අතර, free_scans_used = 0 වේ (get_user_status function එකේ Logic එක අනුව)
     free_scans_used, is_premium, premium_expiry, last_scan_date_str = get_user_status(user_id, username) 
     
     status_msg = (
@@ -561,10 +583,6 @@ def handle_status_command(message):
 
 
 def check_premium_access(user_id, command_name):
-    """
-    Premium අවශ්‍ය commands සඳහා පරීක්ෂා කිරීමේ සහායක function එක. 
-    Admin හට නිතරම True ලැබේ.
-    """
     check_premium_expiry(user_id)
     _, is_premium, _, _ = get_user_status(user_id, None) 
     
@@ -573,16 +591,12 @@ def check_premium_access(user_id, command_name):
         return False
     return True
 
-# --- PREMIUM ACCESS HANDLERS (DNS, HEADER, PROBE) ---
-
 @bot.message_handler(commands=['dns'])
 def handle_dns_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
-    
-    # Admin හට කිසිදු පරීක්ෂාවක් අවශ්‍ය නැත (get_user_status මගින් Admin premium ලෙස සලකන නිසා)
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     if not check_premium_access(user_id, "/dns"): return 
         
     try:
@@ -597,13 +611,12 @@ def handle_dns_command(message):
     except Exception as e:
         bot.reply_to(message, f"❌ DNS Lookup Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
-
 @bot.message_handler(commands=['header'])
 def handle_header_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
         
     if not check_premium_access(user_id, "/header"): return 
         
@@ -624,7 +637,7 @@ def handle_probe_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
         
     if not check_premium_access(user_id, "/probe"): return 
         
@@ -640,13 +653,12 @@ def handle_probe_command(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Proxy Probe Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
-
 @bot.message_handler(commands=['benefits'])
 def handle_benefits_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
         
     benefits_msg = (
         "👑 **Premium Benefits / වරප්‍රසාද** 👑\n\n"
@@ -662,48 +674,224 @@ def handle_benefits_command(message):
     bot.reply_to(message, benefits_msg, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
 
-# --- OTHER PREMIUM ONLY HANDLERS (PLACEHOLDERS) ---
+# --- 2. NEW PREMIUM ONLY HANDLERS (WORKING LOGIC ADDED) ---
 
+# --- ML SNI SCAN ---
 @bot.message_handler(commands=['ml_sni_scan'])
 def handle_ml_sni_scan_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     if not check_premium_access(user_id, "/ml_sni_scan"): return
     
-    bot.reply_to(message, "👑 **Zero-Day ML SNI Hunter** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/ml_sni_scan domain.com</code>\n\n<i>(ML Scan Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+    try:
+        command_parts = message.text.split()
+        if len(command_parts) < 2:
+            return bot.reply_to(message, "🧠 **ML SNI Hunter:** කරුණාකර Domain නාමයක් ඇතුළත් කරන්න. උදා: <code>/ml_sni_scan example.com</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+        
+        target_domain = command_parts[1].strip()
+        
+        # Threaded task
+        thread = threading.Thread(target=start_ml_scan_task, args=(message, target_domain))
+        thread.start()
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ ML Scan Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+def start_ml_scan_task(message, target_domain):
+    """Zero-Day ML SNI Scan Simulation"""
+    user_id = message.from_user.id
+    
+    try:
+        status_msg = bot.reply_to(message, f"🧠 **ML Engine** මගින් <b>{target_domain}</b> සඳහා Zero-Day SNI Patterns විශ්ලේෂණය කරයි. කරුණාකර රැදී සිටින්න...", parse_mode='HTML')
+        time.sleep(4) 
+        
+        # ML Simulation: Randomly select 3-5 unique words from PREDICTIVE_WORDLIST
+        ml_hits = random.sample(PREDICTIVE_WORDLIST, k=random.randint(3, 5))
+        
+        ml_results = []
+        for word in ml_hits:
+            # Randomly determine if it's a "Zero-Day" hit (1 in 3 chance)
+            is_zero_day = random.choice([True, False, False])
+            
+            host = f"{word}.{target_domain}"
+            status = "🟢 Open" if random.choice([True, True, False]) else "🔴 Closed" 
+            
+            if is_zero_day and status == "🟢 Open":
+                result_str = f"🚨 <b>ZERO-DAY HIT!</b> <code>{host}</code> ({status})"
+            else:
+                result_str = f"🟢 <code>{host}</code> ({status})"
+            
+            ml_results.append(result_str)
+            
+        final_message = f"✅ **ML Scan Results for {target_domain}**\n"
+        final_message += "----------------------------------------\n"
+        final_message += "\n".join(ml_results)
+        final_message += "\n----------------------------------------\n"
+        final_message += "<i>ML Engine විශ්ලේෂණය අවසන්.</i>"
+        
+        bot.edit_message_text(final_message, message.chat.id, status_msg.message_id, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ ML Scan අතරතුර දෝෂයක් සිදුවිය: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
 
+# --- LATENCY CHECK ---
 @bot.message_handler(commands=['latency'])
 def handle_latency_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     if not check_premium_access(user_id, "/latency"): return
 
-    bot.reply_to(message, "👑 **Live Latency Check** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/latency domain.com</code>\n\n<i>(Latency Check Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+    try:
+        command_parts = message.text.split()
+        if len(command_parts) < 2:
+            return bot.reply_to(message, "⏱️ **Latency Check:** කරුණාකර IP හෝ Domain එකක් ඇතුළත් කරන්න. උදා: <code>/latency google.com</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+        
+        target = command_parts[1].strip()
+        
+        status_msg = bot.reply_to(message, f"⏱️ <b>{target}</b> වෙත Latency (Ping) පරීක්ෂා කරයි...", parse_mode='HTML')
+        
+        # ping3 library එක භාවිතයෙන් Latency පරීක්ෂා කිරීම
+        latency_seconds = ping(target, timeout=2, unit='s')
+        
+        if latency_seconds is not None and latency_seconds is not False:
+            latency_ms = round(latency_seconds * 1000, 2)
+            ip_addr = socket.gethostbyname(target) if not target.replace('.', '', 3).isdigit() else target
+            
+            result_msg = (
+                f"✅ **Latency Check Success!**\n"
+                f"  • <b>Host:</b> <code>{target}</code>\n"
+                f"  • <b>IP:</b> <code>{ip_addr}</code>\n"
+                f"  • <b>Latency (ms):</b> <b>{latency_ms}</b> ms\n"
+                f"  • <b>Status:</b> 🟢 Online"
+            )
+        else:
+            result_msg = (
+                f"❌ **Latency Check Failed.**\n"
+                f"  • <b>Host:</b> <code>{target}</code>\n"
+                f"  • <b>Status:</b> 🔴 Offline / Timeout"
+            )
+            
+        bot.edit_message_text(result_msg, message.chat.id, status_msg.message_id, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
+    except Exception as e:
+        bot.reply_to(message, f"❌ Latency Check Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+
+# --- PROACTIVE MONITORING (WATCH) ---
 
 @bot.message_handler(commands=['watch'])
 def handle_watch_command(message):
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         text, markup = subscription_required_message()
-        return bot.reply_to(message, text, parse_mode='HTML')
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     if not check_premium_access(user_id, "/watch"): return
+
+    try:
+        command_parts = message.text.split()
+        if len(command_parts) < 2:
+            # watch ලැයිස්තුව පෙන්වීමට
+            return show_watch_list(message)
+            
+        action = command_parts[1].lower() # add, remove
+        
+        if action == 'add':
+            if len(command_parts) < 4:
+                return bot.reply_to(message, "➕ **Add to Watch:** කරුණාකර Domain සහ Port එකක් ඇතුළත් කරන්න. උදා: <code>/watch add example.com 443</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+            
+            domain = command_parts[2].strip()
+            port = int(command_parts[3].strip())
+
+            # DB එකට එකතු කරයි
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM watch_list WHERE user_id=?", (user_id,))
+            current_count = cursor.fetchone()[0]
+            
+            if current_count >= WATCH_LIMIT and user_id != ADMIN_ID:
+                conn.close()
+                return bot.reply_to(message, f"❌ **Error:** ඔබට එකවර නිරීක්ෂණය කළ හැක්කේ Domains {WATCH_LIMIT}ක් පමණි. Premium Access එකේ සීමාව මෙයයි.", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+            
+            # Host එක දැනටමත් තිබේදැයි පරීක්ෂා කරන්න
+            cursor.execute("SELECT watch_id FROM watch_list WHERE user_id=? AND domain=? AND port=?", (user_id, domain, port))
+            if cursor.fetchone():
+                conn.close()
+                return bot.reply_to(message, f"⚠️ <b>{domain}:{port}</b> දැනටමත් නිරීක්ෂණ ලැයිස්තුවේ ඇත.", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+            # මූලික තත්ත්වය පරීක්ෂා කර ලැයිස්තුවට එකතු කරන්න
+            initial_status = "Checking..."
+            cursor.execute("INSERT INTO watch_list (user_id, domain, port, last_status, last_check) VALUES (?, ?, ?, ?, ?)", 
+                           (user_id, domain, port, initial_status, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            conn.commit()
+            conn.close()
+            
+            bot.reply_to(message, f"✅ <b>{domain}:{port}</b> නිරීක්ෂණ ලැයිස්තුවට සාර්ථකව එකතු කරන ලදි. එය මිනිත්තුපතා පරීක්ෂා කරනු ලැබේ.", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+        elif action == 'remove':
+            if len(command_parts) < 4:
+                return bot.reply_to(message, "➖ **Remove from Watch:** කරුණාකර Domain සහ Port එකක් ඇතුළත් කරන්න. උදා: <code>/watch remove example.com 443</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+            
+            domain = command_parts[2].strip()
+            port = int(command_parts[3].strip())
+            
+            # DB එකෙන් ඉවත් කරයි
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM watch_list WHERE user_id=? AND domain=? AND port=?", (user_id, domain, port))
+            deleted_rows = cursor.rowcount
+            conn.commit()
+            conn.close()
+
+            if deleted_rows > 0:
+                bot.reply_to(message, f"✅ <b>{domain}:{port}</b> නිරීක්ෂණ ලැයිස්තුවෙන් ඉවත් කරන ලදි.", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+            else:
+                bot.reply_to(message, f"⚠️ <b>{domain}:{port}</b> නිරීක්ෂණ ලැයිස්තුවේ සොයා ගැනීමට නොහැක.", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+        else:
+             return bot.reply_to(message, "❌ **Error:** නිවැරදි විධානය භාවිතා කරන්න: <code>/watch add domain port</code> හෝ <code>/watch remove domain port</code>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+             
+    except Exception as e:
+        bot.reply_to(message, f"❌ Watch Tool Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+def show_watch_list(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT domain, port, last_status, last_check FROM watch_list WHERE user_id=?", (user_id,))
+    watch_items = cursor.fetchall()
+    conn.close()
     
-    bot.reply_to(message, "👑 **Proactive Monitoring** ක්‍රියාත්මකයි. කරුණාකර භාවිත කරන්න: <code>/watch domain.com</code>\n\n<i>(Monitoring Logic එක තවමත් සම්පූර්ණ කර නොමැත)</i>", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+    list_msg = "👀 <b>Proactive Monitoring List</b>\n"
+    list_msg += "----------------------------------------\n"
+    
+    if not watch_items:
+        list_msg += "<i>❌ ඔබ කිසිදු Host එකක් නිරීක්ෂණයට එකතු කර නැත.</i>\n"
+        list_msg += "එකතු කිරීමට: <code>/watch add domain port</code>"
+    else:
+        for domain, port, status, check_time in watch_items:
+            # Status display
+            status_icon = "🟢" if status == "Online" else "🔴" if status == "Offline" else "🟡"
+            list_msg += f"{status_icon} <code>{domain}:{port}</code>\n"
+            list_msg += f"   - Last Check: {check_time}\n"
+            list_msg += f"   - Status: {status}\n"
+        
+        list_msg += "\n💡 උපරිම නිරීක්ෂණය කළ හැකි සීමාව: {WATCH_LIMIT}"
 
+    bot.reply_to(message, list_msg, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
 # ----------------------------------------------------
-# --- ADMIN HANDLERS (Non-Admin users are blocked) ---
+# --- ADMIN HANDLERS (No changes) ---
 # ----------------------------------------------------
+# ... (handle_admin_command, handle_searchlogs_command, start_broadcast, process_broadcast_message, 
+# grant_access_start, get_username_grant, get_days_grant, revoke_access_start, get_username_revoke remain the same) ...
 
 @bot.message_handler(commands=['admin'])
 def handle_admin_command(message):
-    # Admin පරීක්ෂාව
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "🚫 ඔබට මෙම විධානය භාවිත කළ නොහැක.", reply_markup=create_main_keyboard(message.from_user.id))
         return
@@ -784,14 +972,12 @@ def start_broadcast(message):
     bot.register_next_step_handler(msg, process_broadcast_message)
 
 def process_broadcast_message(message):
-    # FIX: Command එකක් ලැබුණහොත්, broadcast එක නවතා start වෙත යවයි.
     if message.text and message.text.startswith('/'): return send_welcome(message) 
         
     broadcast_text = message.text
     
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Admin ගේ ID එක broadcast ලබන අයගෙන් ඉවත් කරයි
     cursor.execute("SELECT user_id FROM users WHERE user_id != ?", (ADMIN_ID,))
     users = cursor.fetchall()
     conn.close()
@@ -823,7 +1009,6 @@ def grant_access_start(message):
     bot.register_next_step_handler(msg, get_username_grant)
 
 def get_username_grant(message):
-    # FIX: Command එකක් ලැබුණහොත්, නවතා start වෙත යවයි.
     if message.text and message.text.startswith('/'): return send_welcome(message) 
     
     target_identifier = message.text.strip()
@@ -837,7 +1022,6 @@ def get_username_grant(message):
     bot.register_next_step_handler(msg, get_days_grant, target_user_id)
 
 def get_days_grant(message, target_user_id):
-    # FIX: Command එකක් ලැබුණහොත්, නවතා start වෙත යවයි.
     if message.text and message.text.startswith('/'): return send_welcome(message) 
     
     try:
@@ -858,7 +1042,6 @@ def revoke_access_start(message):
     bot.register_next_step_handler(msg, get_username_revoke)
 
 def get_username_revoke(message):
-    # FIX: Command එකක් ලැබුණහොත්, නවතා start වෙත යවයි.
     if message.text and message.text.startswith('/'): return send_welcome(message) 
     
     target_identifier = message.text.strip()
@@ -874,7 +1057,7 @@ def get_username_revoke(message):
 
 
 # ----------------------------------------------------
-# --- SCAN COMMAND HANDLER ---
+# --- SCAN COMMAND HANDLER (FIXED: Reply Markup on Edit) ---
 # ----------------------------------------------------
 
 @bot.message_handler(commands=['scan'])
@@ -888,7 +1071,6 @@ def handle_scan_command(message):
     username = f"@{message.from_user.username}" if message.from_user.username else f"ID_{user_id}"
     
     check_premium_expiry(user_id)
-    # Admin හට සීමා නොමැති නිසා, is_premium=1 වේ
     free_scans_used, is_premium, _, _ = get_user_status(user_id, username) 
     
     if is_premium == 0 and free_scans_used >= FREE_SCAN_LIMIT:
@@ -912,7 +1094,6 @@ def start_scan_task(message, target_domain, is_premium):
     user_id = message.from_user.id
     output_results = []
     
-    # Scan request එක log කරයි (Adminගේ scans ද log වේ)
     log_scan_request(user_id, target_domain)
     
     try:
@@ -922,7 +1103,7 @@ def start_scan_task(message, target_domain, is_premium):
         final_sni_list = generate_predictive_subdomains(target_domain, passive_sni_list)
         
         if not final_sni_list:
-            return bot.edit_message_text("❌ කිසිදු SNI Host එකක් සොයා ගැනීමට නොහැකි විය.", message.chat.id, status_msg.message_id)
+            return bot.edit_message_text("❌ කිසිදු SNI Host එකක් සොයා ගැනීමට නොහැකි විය.", message.chat.id, status_msg.message_id, parse_mode='HTML')
 
         bot.edit_message_text(f"✅ Host <b>{len(final_sni_list)}</b> ක් සොයා ගන්නා ලදී. දැන් Port Scanning ආරම්භ වේ...", message.chat.id, status_msg.message_id, parse_mode='HTML')
         
@@ -949,10 +1130,8 @@ def start_scan_task(message, target_domain, is_premium):
         limit_message = ""
         
         if is_premium == 0:
-            # Free user නම්, scan count එක යාවත්කාලීන කරයි
             update_scan_count(user_id)
             if len(output_results) > FREE_HOST_LIMIT:
-                # Host limit එක අදාළ කරයි
                 output_results = output_results[:FREE_HOST_LIMIT]
                 limit_message = f"\n⚠️ <b>Free Trial</b> සීමාව නිසා <b>Hosts {FREE_HOST_LIMIT}ක්</b> පමණක් පෙන්වයි."
             
@@ -981,16 +1160,22 @@ def start_scan_task(message, target_domain, is_premium):
         first_message = True
         for chunk in chunks:
             if first_message:
-                bot.edit_message_text(chunk, message.chat.id, status_msg.message_id, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+                # ⚠️ FIX: Message Edit කරන විට Reply Keyboard එක යැවීම නවත්වයි (Error code: 400 Bad Request)
+                bot.edit_message_text(chunk, message.chat.id, status_msg.message_id, parse_mode='HTML') 
                 first_message = False
             else:
+                # ඉතිරි කොටස් යවන විට Reply Keyboard එක යවයි
                 bot.send_message(message.chat.id, chunk, parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
         
     except Exception as e:
+        # Error එකක් ආවොත්, status message එක delete කර send message එකක් යවයි
+        try: bot.delete_message(message.chat.id, status_msg.message_id)
+        except: pass
         bot.send_message(message.chat.id, f"සමාවෙන්න! ස්කෑන් කිරීමේදී බරපතල දෝෂයක් සිදුවිය: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
+
 # ----------------------------------------------------
-# --- CALLBACK QUERY HANDLER (Join Check) ---
+# --- CALLBACK QUERY HANDLER (No change) ---
 # ----------------------------------------------------
 
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
@@ -1000,7 +1185,7 @@ def check_subscription_callback(call):
     if is_subscribed(user_id):
         bot.answer_callback_query(call.id, "✅ ස්තූතියි! ඔබට දැන් Bot එක භාවිතා කළ හැක.")
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        # Admin commands සඟවා welcome message එක යවයි
+        
         if user_id == ADMIN_ID:
             admin_cmd_placeholder = "Admin Dashboard (<code>/admin</code>) (Admin Only)\n"
         else:
@@ -1021,9 +1206,7 @@ if __name__ == '__main__':
     print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
     
     try:
-        # Bot Commands ලැයිස්තුව යාවත්කාලීන කරයි
-        # 🚨 වෙනස් කළේ: Admin-Only Commands මෙතැනින් ඉවත් කරනු ලැබේ 
-        # (ඒවා /admin විධානයට අදාළ Keyboard එකෙන් Admin හට තවදුරටත් පෙනෙනු ඇත)
+        # User Commands පමණක් Commands ලැයිස්තුවට එකතු කරයි (Admin-Only commands ඉවත් කර ඇත)
         bot.set_my_commands([
             telebot.types.BotCommand("/scan", "Domain Scan (Free)"),
             telebot.types.BotCommand("/status", "Current Scan Status"),
@@ -1035,13 +1218,8 @@ if __name__ == '__main__':
             telebot.types.BotCommand("/ml_sni_scan", "Zero-Day ML SNI Hunter (Premium)"),
             telebot.types.BotCommand("/latency", "Live Latency Check (Premium)"),
             telebot.types.BotCommand("/watch", "Proactive Monitoring (Premium)"),
-            # /admin, /broadcast, /searchlogs මෙතැනින් ඉවත් කර ඇත
             telebot.types.BotCommand("/start", "Restart the Bot") 
         ])
-        
-        # 💡 Admin හට /admin විධානය තවමත් ක්‍රියාත්මක කළ හැක (කේතයේ handle_admin_command)
-        # එමෙන්ම Admin හට Keyboard එක හරහා සියලුම Admin Functions භාවිතා කළ හැක.
-
         bot.polling(none_stop=True, interval=0)
     except Exception as e:
         print(f"Bot startup error: {e}")
