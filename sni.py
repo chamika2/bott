@@ -529,31 +529,32 @@ def create_main_keyboard(user_id):
     markup.add(btn_premium, btn_benefits)
     
     # ----------------------------------------
-    # --- 2. NETWORK DIAGNOSTICS (ජාල රෝග විනිශ්චය) ---
+    # --- 2. Premium Tools (සියලු දෙනාටම) ---
     # ----------------------------------------
     
     # පේළිය 3
+    btn_ml_scan = KeyboardButton('🧠 ML Scan')       # /ml_sni_scan
     btn_latency = KeyboardButton('⏱️ Latency')       # /latency
-    btn_dns = KeyboardButton('🌐 DNS Lookup')      # /dns
-    markup.add(btn_latency, btn_dns)
+    markup.add(btn_ml_scan, btn_latency)
     
     # පේළිය 4
-    btn_geoip = KeyboardButton('🌎 Geo-IP')         # /geoip  <-- NEW BUTTON
-    btn_header = KeyboardButton('📝 Header')       # /header
-    markup.add(btn_geoip, btn_header)
-    
-    # ----------------------------------------
-    # --- 3. ADVANCED / PROACTIVE TOOLS (උසස් මෙවලම්) ---
-    # ----------------------------------------
-    
-    # පේළිය 5
-    btn_ml_scan = KeyboardButton('🧠 ML Scan')       # /ml_sni_scan
     btn_watch = KeyboardButton('👀 Monitoring')    # /watch
-    markup.add(btn_ml_scan, btn_watch)
+    btn_dns = KeyboardButton('🌐 DNS Lookup')      # /dns
+    markup.add(btn_watch, btn_dns)
     
-    # පේළිය 6
-    btn_probe = KeyboardButton('🔌 Probe')         # /probe
-    markup.add(btn_probe) # මෙය වෙනම පේළියක
+    # පේළිය 5 (අනෙකුත් tools)
+    btn_header = KeyboardButton('📝 Header')       # /header
+    btn_probe = KeyboardButton('🔌 Probe')          # /probe
+    markup.add(btn_header, btn_probe)
+    
+    # පේළිය 6 (Premium Tools)
+    btn_dumpster = KeyboardButton('📂 DNSDumpster') # Premium Only
+    btn_geoip = KeyboardButton('🌎 Geo-IP')         # /geoip
+    markup.add(btn_dumpster, btn_geoip)
+
+    # පේළිය 7 - අලුතින් එක් කළ Reverse IP
+    btn_revip = KeyboardButton('🔄 Reverse IP')    # /revip (Premium Only)
+    markup.add(btn_revip) # මෙය තනි පේළියක විශාලව පෙනේවි
     
     # ----------------------------------------
     # --- 4. Admin Commands (Admin ට පමණක්) ---
@@ -707,6 +708,55 @@ def handle_probe_command(message):
         
     except Exception as e:
         bot.reply_to(message, f"❌ Proxy Probe Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
+
+# --- DNSDumpster Logic ---
+def get_deep_dns_data(domain):
+    try:
+        # DNSDumpster වැනි ගැඹුරු දත්ත සඳහා HackerTarget API භාවිතා කරයි
+        url = f"https://api.hackertarget.com/dnslookup/?q={domain}"
+        response = requests.get(url, timeout=10).text
+        return response if "error" not in response.lower() else "❌ දත්ත ලබා ගත නොහැක."
+    except:
+        return "❌ සම්බන්ධතා දෝෂයකි."
+
+# --- DNSDumpster Handler ---
+@bot.message_handler(commands=['dnsdumpster'])
+def handle_dumpster(message):
+    user_id = message.from_user.id
+    
+    # 1. මූලික Subscription පරීක්ෂාව
+    if not is_subscribed(user_id):
+        text, markup = subscription_required_message()
+        return bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+    
+    # 2. Premium Access පරීක්ෂාව (ඔබේ Bot එකේ ඇති check_premium_access භාවිතා කිරීම)
+    if not check_premium_access(user_id, "/dnsdumpster"): 
+        return 
+
+    try:
+        command_parts = message.text.split()
+        
+        # 3. Domain එක ඇතුළත් කර නොමැති නම් උපදෙස් පණිවිඩය
+        if len(command_parts) < 2:
+            instruction = (
+                "📂 **DNSDumpster (Deep Search)**\n\n"
+                "කරුණාකර Domain නාමයක් සමඟ විධානය ලබා දෙන්න.\n"
+                "උදා: `/dnsdumpster google.com`"
+            )
+            return bot.reply_to(message, instruction, parse_mode='Markdown', reply_markup=create_main_keyboard(user_id))
+        
+        # 4. දත්ත ලබා ගැනීම
+        domain = command_parts[1].strip().replace("https://", "").replace("http://", "").split('/')[0]
+        status_msg = bot.send_message(message.chat.id, "🔎 **DNS Records පරීක්ෂා කරමින් පවතී...**")
+        
+        result = get_deep_dns_data(domain)
+        
+        # ප්‍රතිඵලය පෙන්වීම
+        final_text = f"🎯 **DNSDumpster Results:** `{domain}`\n\n<pre>{result[:3500]}</pre>"
+        bot.edit_message_text(final_text, message.chat.id, status_msg.message_id, parse_mode='HTML')
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ DNSDumpster Error: {e}", parse_mode='HTML', reply_markup=create_main_keyboard(user_id))
 
 @bot.message_handler(commands=['geoip'])
 def handle_geoip_command(message):
@@ -1285,10 +1335,10 @@ def check_subscription_callback(call):
 # --- NEW KEYBOARD BUTTON HANDLER (Mapping Text to Command) ---
 # ----------------------------------------------------
 
-@bot.message_handler(func=lambda message: message.text in [
+@@bot.message_handler(func=lambda message: message.text in [
     '🔎 Scan Domain', '📊 Status', '👑 Premium', '🎁 Benefits', 
     '🧠 ML Scan', '⏱️ Latency', '👀 Monitoring', '🌐 DNS Lookup', 
-    '📝 Header', '🔌 Probe', '🌎 Geo-IP' # <-- Geo-IP ADDED HERE
+    '📝 Header', '🔌 Probe', '📂 DNSDumpster', '🌎 Geo-IP' # <-- Geo-IP ADDED HERE
 ])
 def handle_keyboard_button_press(message):
     text = message.text
@@ -1303,16 +1353,15 @@ def handle_keyboard_button_press(message):
         '🌐 DNS Lookup': '/dns',
         '📝 Header': '/header',
         '🔌 Probe': '/probe',
+        '📂 DNSDumpster': '/dnsdumpster',
         '🌎 Geo-IP': '/geoip', # <-- Geo-IP MAPPING ADDED HERE
-    }
-    
-    command = command_map.get(text)
+    }     command = command_map.get(text)
     
     if command:
         message.text = command 
         
         # අදාළ handler වෙත යොමු කිරීම
-        if command == '/scan':
+        iif command == '/scan':
             handle_scan_command(message)
         elif command == '/status':
             handle_status_command(message)
@@ -1338,30 +1387,35 @@ def handle_keyboard_button_press(message):
         elif command == '/probe':
             message.text = command
             handle_probe_command(message)
+        elif command == '/dnsdumpster':
+            handle_dumpster(message)
         elif command == '/geoip': # <-- Geo-IP HANDLER CALL ADDED HERE
             message.text = command
-            handle_geoip_command(message)
-
-
-# ----------------------------------------------------
+            handle_geoip_command(message)# ----------------------------------------------------
 # --- START THE BOT ---
 # ----------------------------------------------------
 
-if __name__ == '__main__':
+if __name__ ==----------':
     setup_db() 
-    print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
+    print == '__main__':
+    setup_db() 
+    print("Telegra")
     
     try:
         # Telegram හි /menu විධානයෙන් පෙන්වන පෙරනිමි Commands ලැයිස්තුව ඉවත් කිරීමට
         # (ඔබට සියලුම commands keyboard එකෙන් පෙන්වන නිසා)
         bot.set_my_commands([
-            telebot.types.BotCommand("/scan", "Domain Scan (Free)"),
-            telebot.types.BotCommand("/status", "Current Scan Status"),
-            telebot.types.BotCommand("/premium", "Get Premium Access Details"),
-            telebot.types.BotCommand("/start", "Restart the Bot"),
+            telebot.types.BotCommandds([
+  ",        telebot.type"),
+            telebot.types.BotCommand)"),
+    ",      telebot.types.B"),
+            telebot.types.BotCommands"),
+     ",     telebot.types.BotComman"),
+            telebot.types.BotCommands"),
+   ",       telebot.ty"),
             # අනෙකුත් commands /menu එකේ පෙන්වීම අවශ්‍ය නැත
         ])
-        
-        bot.polling(none_stop=True, interval=0)
+       එ        bot.polling(none_stop=True, interval=0)
     except Exception as e:
         print(f"Bot startup error: {e}")
+
