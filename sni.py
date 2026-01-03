@@ -549,10 +549,6 @@ def create_main_keyboard(user_id):
     btn_dumpster = KeyboardButton('📂 DNSDumpster') # Premium Only
     btn_geoip = KeyboardButton('🌎 Geo-IP')         # /geoip
     markup.add(btn_dumpster, btn_geoip)
-
-    # පේළිය 7 - අලුතින් එක් කළ Reverse IP
-    btn_revip = KeyboardButton('🔄 Reverse IP')    # /revip (Premium Only)
-    markup.add(btn_revip) # මෙය තනි පේළියක විශාලව පෙනේවි
     
     # ----------------------------------------
     # --- 4. Admin Commands (Admin ට පමණක්) ---
@@ -1411,6 +1407,7 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"Bot startup error: {e}")
+
 
 
 
