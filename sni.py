@@ -1336,7 +1336,7 @@ def check_subscription_callback(call):
 @bot.message_handler(func=lambda message: message.text in [
     '🔎 Scan Domain', '📊 Status', '👑 Premium', '🎁 Benefits', 
     '🧠 ML Scan', '⏱️ Latency', '👀 Monitoring', '🌐 DNS Lookup', 
-    '📝 Header', '🔌 Probe', '📂 DNSDumpster', '🌎 Geo-IP' # <-- Geo-IP ADDED HERE
+    '📝 Header', '🔌 Probe', '📂 DNSDumpster', '🌎 Geo-IP'
 ])
 def handle_keyboard_button_press(message):
     text = message.text
@@ -1352,14 +1352,16 @@ def handle_keyboard_button_press(message):
         '📝 Header': '/header',
         '🔌 Probe': '/probe',
         '📂 DNSDumpster': '/dnsdumpster',
-        '🌎 Geo-IP': '/geoip', # <-- Geo-IP MAPPING ADDED HERE
-    }     command = command_map.get(text)
+        '🌎 Geo-IP': '/geoip',
+    }     
+    
+    command = command_map.get(text)
     
     if command:
         message.text = command 
         
         # අදාළ handler වෙත යොමු කිරීම
-        iif command == '/scan':
+        if command == '/scan':
             handle_scan_command(message)
         elif command == '/status':
             handle_status_command(message)
@@ -1368,28 +1370,23 @@ def handle_keyboard_button_press(message):
         elif command == '/benefits':
             handle_benefits_command(message)
         elif command == '/ml_sni_scan':
-            message.text = command 
             handle_ml_sni_scan_command(message)
         elif command == '/latency':
-            message.text = command
             handle_latency_command(message)
         elif command == '/watch':
-            message.text = command 
             handle_watch_command(message)
         elif command == '/dns':
-            message.text = command
             handle_dns_command(message)
         elif command == '/header':
-            message.text = command
             handle_header_command(message)
         elif command == '/probe':
-            message.text = command
             handle_probe_command(message)
         elif command == '/dnsdumpster':
             handle_dumpster(message)
-        elif command == '/geoip': # <-- Geo-IP HANDLER CALL ADDED HERE
-            message.text = command
-            handle_geoip_command(message)# ----------------------------------------------------
+        elif command == '/geoip':
+            handle_geoip_command(message)
+
+# ----------------------------------------------------
 # --- START THE BOT ---
 # ----------------------------------------------------
 
@@ -1400,7 +1397,7 @@ if __name__ == '__main__':
     print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
 
     try:
-        # 2. Menu Commands සැකසීම (විකල්පයි - ඔබට අවශ්‍ය නම් පමණක් තබා ගන්න)
+        # 2. Menu Commands සැකසීම
         bot.set_my_commands([
             telebot.types.BotCommand("start", "බොට් ආරම්භ කරන්න"),
             telebot.types.BotCommand("menu", "ප්‍රධාන මෙනුව"),
@@ -1414,6 +1411,7 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"Bot startup error: {e}")
+
 
 
 
