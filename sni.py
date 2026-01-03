@@ -1333,7 +1333,7 @@ def check_subscription_callback(call):
 # --- NEW KEYBOARD BUTTON HANDLER (Mapping Text to Command) ---
 # ----------------------------------------------------
 
-@@bot.message_handler(func=lambda message: message.text in [
+@bot.message_handler(func=lambda message: message.text in [
     '🔎 Scan Domain', '📊 Status', '👑 Premium', '🎁 Benefits', 
     '🧠 ML Scan', '⏱️ Latency', '👀 Monitoring', '🌐 DNS Lookup', 
     '📝 Header', '🔌 Probe', '📂 DNSDumpster', '🌎 Geo-IP' # <-- Geo-IP ADDED HERE
@@ -1414,5 +1414,6 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"Bot startup error: {e}")
+
 
 
