@@ -1,5 +1,3 @@
-
-
 import telebot
 import requests
 import socket
@@ -1395,27 +1393,26 @@ def handle_keyboard_button_press(message):
 # --- START THE BOT ---
 # ----------------------------------------------------
 
-if __name__ ==----------':
+if __name__ == '__main__':
+    # 1. Database එක සකස් කිරීම
     setup_db() 
-    print == '__main__':
-    setup_db() 
-    print("Telegra")
     
+    print("Telegram Bot ආරම්භ විය / Telegram Bot started...")
+
     try:
-        # Telegram හි /menu විධානයෙන් පෙන්වන පෙරනිමි Commands ලැයිස්තුව ඉවත් කිරීමට
-        # (ඔබට සියලුම commands keyboard එකෙන් පෙන්වන නිසා)
+        # 2. Menu Commands සැකසීම (විකල්පයි - ඔබට අවශ්‍ය නම් පමණක් තබා ගන්න)
         bot.set_my_commands([
-            telebot.types.BotCommandds([
-  ",        telebot.type"),
-            telebot.types.BotCommand)"),
-    ",      telebot.types.B"),
-            telebot.types.BotCommands"),
-     ",     telebot.types.BotComman"),
-            telebot.types.BotCommands"),
-   ",       telebot.ty"),
-            # අනෙකුත් commands /menu එකේ පෙන්වීම අවශ්‍ය නැත
+            telebot.types.BotCommand("start", "බොට් ආරම්භ කරන්න"),
+            telebot.types.BotCommand("menu", "ප්‍රධාන මෙනුව"),
+            telebot.types.BotCommand("premium", "Premium විස්තර"),
+            telebot.types.BotCommand("help", "උදව් ලබා ගන්න")
         ])
-       එ        bot.polling(none_stop=True, interval=0)
+        
+        # 3. බොට් ක්‍රියාත්මක කරවීම (Polling)
+        print("Bot is polling...")
+        bot.polling(none_stop=True, interval=0)
+
     except Exception as e:
         print(f"Bot startup error: {e}")
+
 
